@@ -6,9 +6,10 @@ Issues and pull requests are welcome. Security problems: see `SECURITY.md` (priv
 
 1. **No number without a proof or a reason.** An interval marked GARANTITO must follow from `docs/PROOF.md`; where the
    proof does not apply, the code raises `FuoriDominio` with the reason instead of returning a number.
-2. **Unknown input is refused with a named reason, and a test shows it.** The certificate reader refuses unknown,
-   missing and repeated keys, NaN/Infinity, numbers that overflow, a BOM and wrong types at every level
-   (`tests/test_integrazione_scq.py`, class `TestCertificato`, generative over every key and leaf).
+2. **Unknown input is refused with a named reason, and a test shows it.** `Rotore` refuses NaN, ±inf, booleans,
+   strings and other non-numbers, non-integer or non-positive harmonics and E_C ≤ 0 (`tests/test_rotore_spettro.py`,
+   including 400 random inputs); `livelli_garantiti` refuses anything outside the domain of the proof with
+   `FuoriDominio`; the adapter refuses any rotor that is not a transmon.
 3. **Tests first fail, then pass.** A fix comes with a test that fails on the old code. A new check comes with a
    positive control: an input it must refuse.
 4. **Only measured sentences** in README, docstrings and commit messages. If a number is quoted, say how it was

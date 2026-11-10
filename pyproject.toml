@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "qraft-ra"
 dynamic = ["version"]
-description = "Guaranteed eigenvalue intervals for the charge-basis rotor (transmon, cos 2φ), a reproducible computation certificate, and a convergence warning for scqubits"
+description = "Guaranteed eigenvalue intervals for the charge-basis rotor (transmon, cos 2φ), a float solver with a declared error, and a convergence warning for scqubits"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"

@@ -3,6 +3,6 @@ Copyright 2026 Roberto Locatelli
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
-The three certificates in tests/data/certificates_v1/ were produced by the author with the same code on 2026-11-08.
-Optional dependencies keep their own licenses: python-flint (MIT AND LGPL-3.0-or-later, contains FLINT), scqubits
-(BSD-3-Clause), mpmath (BSD-3-Clause), numpy and scipy (BSD-3-Clause).
+Dependencies are not included and keep their own licenses, as declared in their package metadata (read on
+2026-11-10): python-flint 0.9.0 "MIT AND LGPL-3.0-or-later"; numpy 2.4.6 "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND
+CC0-1.0"; scipy, scqubits (optional) and mpmath (tests only): BSD licenses.

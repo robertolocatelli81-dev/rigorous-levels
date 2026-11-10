@@ -2,8 +2,8 @@
 # Copyright 2026 Roberto Locatelli
 """Tests of qraft_ra.rotore_spettro: closed input grammar and the convergence state.
 
-Before the extraction the grammar of the rotor was exercised through the certificate tests; this file tests it
-directly. Every malformed input must end in IngressoRifiutato, never in a number or in another exception.
+The grammar of the rotor, tested directly: a malformed Rotore, k or tol must end in IngressoRifiutato, never in a
+number or in another exception.
 """
 import math
 import random
