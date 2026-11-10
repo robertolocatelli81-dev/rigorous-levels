@@ -108,16 +108,26 @@ seeds, the same case generators as the author's benchmarks of 2026-11-08). Times
 | Adapter, mode `raddoppio`, ncut = 30 | flags 65 of 65 wrong results, 0 false alarms on the 135 right ones |
 | Adapter, mode `auto` | 0 of 200 wrong |
 | Device regime, 200 transmons (E_C 0.05–1 GHz, E_J/E_C 1–1000): our solver against the adapter in mode `auto` | largest difference on E_j − E_0: 2.3e-12 GHz |
-| Time per point, device regime, one BLAS thread (`OMP_NUM_THREADS=1`) | scqubits at ncut = 30: 0.29 ms; our float solver: 3.1 ms (about 11 times slower) |
+| Time per point, device regime, one BLAS thread (`OMP_NUM_THREADS=1`, same cases, separate run) | scqubits at ncut = 30: 0.29 ms; our float solver: 3.1 ms (about 11 times slower) |
 | The same with the default 8 BLAS threads | scqubits 0.71 ms (adapter `auto` 1.25 ms); our solver 29.5 ms (about 40 times slower: thread overhead on small matrices) |
-
-Test suite: see "Tests" below.
 
 ## Tests
 
 `cd tests && python -m unittest test_intervallo_garantito test_scqubits_adattatore test_rotore_spettro
-test_readme_example`, against the installed package (`pip install ".[scqubits,test]"`). Counts measured on 2026-11-10
-are in the commit message that records them.
+test_readme_example`, against the installed package (`pip install ".[scqubits,test]"`). Measured on 2026-11-10 from a clean clone, each
+in a new virtual environment with the package installed by pip from the clone:
+
+| Python | numpy, scipy | Result |
+|---|---|---|
+| 3.11.2 | 2.4.6, 1.17.1 | 56 tests, OK |
+| 3.12.15 | 2.5.4, 1.18.1 | 56 tests, OK |
+| 3.13.15 | 2.5.4, 1.18.1 | 56 tests, OK |
+| 3.11.2, without the extras (no scqubits, no mpmath) | 2.4.6, 1.17.1 | 56 tests, OK, 40 skipped |
+
+Python 3.10 was not available on the author's machine: the CI matrix includes it, not yet run. Positive control: each
+of 8 evident mutants of the three modules (the L_out check removed, an uncertain pivot counted, the lower bound taken
+from H_N, L_out without max(1, 1/α), no basis doubling, NaN accepted, the warning never raised, the adapter's domain
+check removed) makes the suite fail (Python 3.11).
 
 **Reported on 2026-11-08 and 2026-11-09** in the author's measurement logs (not in this repository, not re-run here):
 
