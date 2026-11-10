@@ -8,9 +8,11 @@ directly. Every malformed input must end in IngressoRifiutato, never in a number
 import math
 import random
 import unittest
+from unittest import mock
 
 import numpy as np
 
+from qraft_ra import rotore_spettro as RS
 from qraft_ra.rotore_spettro import NON_CONVERGENTE, OK, IngressoRifiutato, Rotore, spettro
 
 CATTIVI_NUMERO = [math.nan, math.inf, -math.inf, True, False, None, "1.0", [1.0], {}, 1 + 0j, np.nan, np.float64(np.inf)]
@@ -97,6 +99,18 @@ class TestStato(unittest.TestCase):
         s = spettro(Rotore.transmon(1.0, 1e6), 6, 1e-12, nmax_limite=20)
         self.assertEqual(s.stato, NON_CONVERGENTE)
         self.assertEqual(s.errore, math.inf)
+
+    def test_la_base_cresce_finche_converge(self):
+        """From a basis far too small (nmax = 3), the basis must keep doubling: the error returned is within tol and the
+        levels agree with the default start. Without the second method, nothing else would catch a stop too early."""
+        r = Rotore.transmon(1.0, 50.0, 0.3)
+        giusto = spettro(r, 6, 1e-9, doppio_metodo=False)
+        with mock.patch.object(RS, "_nmax_iniziale", return_value=3):
+            s = spettro(r, 6, 1e-9, doppio_metodo=False)
+        self.assertEqual(s.stato, OK)
+        self.assertGreater(s.nmax, 6)
+        self.assertLessEqual(s.errore, max(1e-9, s.pavimento))
+        self.assertLess(max(abs(a - b) for a, b in zip(s.energie, giusto.energie)), 1e-8)
 
     def test_secondo_metodo_concorda(self):
         s = spettro(Rotore(0.25, {1: -20.0, 2: 1.5}, {1: 0.3}, 0.41), 6, 1e-10)
