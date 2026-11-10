@@ -1,0 +1,8 @@
+qraft-ra
+Copyright 2026 Roberto Locatelli
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The three certificates in tests/data/certificates_v1/ were produced by the author with the same code on 2026-11-08.
+Optional dependencies keep their own licenses: python-flint (MIT AND LGPL-3.0-or-later, contains FLINT), scqubits
+(BSD-3-Clause), mpmath (BSD-3-Clause), numpy and scipy (BSD-3-Clause).

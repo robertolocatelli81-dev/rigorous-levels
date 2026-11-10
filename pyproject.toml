@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qraft-ra"
+dynamic = ["version"]
+description = "Guaranteed eigenvalue intervals for the charge-basis rotor (transmon, cos 2φ), a reproducible computation certificate, and a convergence warning for scqubits"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Roberto Locatelli" }]
+dependencies = ["numpy>=1.26", "scipy>=1.11", "python-flint>=0.9.0"]
+
+[project.optional-dependencies]
+scqubits = ["scqubits>=4.3.1"]
+test = ["mpmath>=1.3.0"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+packages = ["qraft_ra"]
+
+[tool.setuptools.dynamic]
+version = { attr = "qraft_ra.__version__" }
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "E", "W"]
+ignore = ["E501", "E741"]   # long lines are allowed up to the formatter's taste; l/I/O names are usual in math code

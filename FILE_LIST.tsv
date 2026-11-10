@@ -1,0 +1,27 @@
+# FILE_LIST.tsv — closed list of the files of this repository. Any other file is an error of check_tree.py.
+# columns: path<TAB>sha256 in this repository<TAB>kind (copy | derived | new)<TAB>sha256 of the source file or -
+# derived = from the author's OMEGA repository, commit d29eeedc (2026-11-10), with declared changes: package name
+# in imports, Apache-2.0 header, docstrings and comments translated to English, unused functions removed, tests
+# of the certificate module removed (see the commit message). check_tree.py, LICENSE and SECURITY.md are adapted
+# from the author's pq-scitt repository and listed as new.
+.github/workflows/ci.yml	2c5da9374d887e7ee957343e7a7fd6a72d3ab731a6d44d95243590f47ebffe48	new	-
+.gitignore	38aa872843f05008de09056f5acb78835d8a8c9b21bc68854ec2f78b8c86fb07	new	-
+CONTRIBUTING.md	6487932c683bcd5f5efe5b88678507d1c5117a1a0ccd67bf33a59bc8210b3f86	new	-
+LICENSE	cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30	new	-
+MANIFEST.in	c56092c614a820c4608b2f886489238b63c0cb00f96794db937cccd05b3c8e4a	new	-
+NOTICE	e982b4e1de969955e50316fdefc410b224d644ead31c8ca05c05c12f71026a03	new	-
+README.md	9cc3377907d968a7aad8d09ff8c6404fdc84a0e067807e5f5e5f27de32154dc9	new	-
+SECURITY.md	285f04f2712186aa993fa4926884a509cdcf3d9ccb44df6638d41dffb7698cd6	new	-
+bench/readme_numbers.py	9c0b69343bf84b3e426ea7aca2f4c92514a31c4318dbce1b3bc4acda2ba65012	new	-
+check_tree.py	e7f1d11c9a31d7a0bd6935adcf6176c5e8f82350b46f5578fb5d7d015057440b	new	-
+docs/PROOF.md	21c64306c1dfe59e0208af39dac0b51b0bbb0843bc95ecde708a2dd62d9aea9d	new	-
+pyproject.toml	94113669c2d7e51fea073fa37bf91e86957e53d103fe7bae98925d59ca84a802	new	-
+requirements/ci.txt	8441273a1dc617f07696fbae858e1a7097a18fbfe339782059d009e9820a8829	new	-
+src/qraft_ra/__init__.py	82fb7fd3ea42cd498347661042baf7cfd593cf4864569e68c14f21e609daa192	new	-
+src/qraft_ra/intervallo_garantito.py	95b6979d801ec3aa01248881bab34bac45e0330740125664e8c8eb61aebcde19	derived	4fb43f09aee317d3d26beb378c7f732ec0d254cbdab559eef36984d8532f4b1a
+src/qraft_ra/rotore_spettro.py	c05e3d5e1ce14895432741c31d9e93d5406e65d6fe7bbeb3b2c6aed4e95f0294	derived	c92a5192777fa2c2b8b4e92ab488d3b4b393b00df6ec6e6f39379431dedf929b
+src/qraft_ra/scqubits_adattatore.py	c4b1a5b6b5e15d8fe45659e0bd853c4ea6acac7d2201b8982302232bdd2fd20f	derived	5705688caf2b6e6eacd00eb2f9b9a143a042219c834a7260dcc5a4e1623e9034
+tests/test_intervallo_garantito.py	a14a5039c991c123dd875ad5e467f9ffd11266ac46e22bda08280062b0bfa906	derived	d1751e48d77b4c97b12f83c0d4de08fc6594493983ddac00752f840c0cc43229
+tests/test_readme_example.py	a669d3a97e82898f4e25864aea9dd7a28e1df946df0552e3463504f17879af31	new	-
+tests/test_rotore_spettro.py	5ed043b02cbcdaa08da318d47351929320ea59eb730113a675601fff7589b4b0	new	-
+tests/test_scqubits_adattatore.py	dee49c32e7a8feedc5d14568a22781f146e653dc6d3dced4d5b6ad4e15cfbab0	derived	e6365cd394bc8f50eb161a68a96eec087f7054412fbc8b1b4d903f51d408088b
