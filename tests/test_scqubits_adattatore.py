@@ -1,10 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Roberto Locatelli
 """Test di qraft_ra/scqubits_adattatore.py, regola "soglia-scq/1.0" (11/11/2026). Specifica e PREREG in
-gtm/qraft_soglia_20261111/. Ogni test deve poter fallire: controlli positivi sulla formula e sui rami."""
+note dell'autore (non pubblicate). Ogni test deve poter fallire: controlli positivi sulla formula e sui rami."""
 import importlib.util
 import shutil
-import sys
 import unittest
-from pathlib import Path
 
 import numpy as np
 

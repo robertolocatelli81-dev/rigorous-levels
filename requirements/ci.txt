@@ -1,8 +1,13 @@
 # Dependencies for the tests (pip install -r requirements/ci.txt). Pinned by version, NOT by hash yet.
 # Versions measured locally on 2026-11-10 (Python 3.11): numpy 2.4.6, scipy 1.17.1; Python 3.12 and 3.13: numpy 2.5.4,
 # scipy 1.18.1. The pins below are the ones of Python 3.12/3.13.
-numpy==2.5.4
-scipy==1.18.1
+# numpy 2.5.4 and scipy 1.18.1 have no wheels for Python 3.10/3.11 (pip download, 2026-11-11): older pins there.
+numpy==2.2.6; python_version < "3.11"
+numpy==2.4.6; python_version == "3.11"
+numpy==2.5.4; python_version >= "3.12"
+scipy==1.15.3; python_version < "3.11"
+scipy==1.17.1; python_version == "3.11"
+scipy==1.18.1; python_version >= "3.12"
 python-flint==0.9.0
 mpmath==1.3.0
 scqubits==4.3.1

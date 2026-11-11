@@ -2,7 +2,7 @@
 # Copyright 2026 Roberto Locatelli
 """qraft_ra/duffing_vs_transmon.py — errore GARANTITO, per livello, del modello di Duffing rispetto al transmon completo.
 
-Specifica (scritta prima): gtm/qraft_duffing_20261111/SPECIFICA_DUFFING_v0.1.md. Gli stack di dinamica (qutip-qip
+Specifica (scritta prima): note dell'autore (non pubblicate). Gli stack di dinamica (qutip-qip
 circuitqed.py:84-120, dynamiqs benchmarks/systems.py:58-82) usano H_D = ω a†a + (α/2) a†a†aa; i suoi livelli sono
 esatti e diagonali in Fock: E^D_j = ω j + (α/2) j (j − 1). Il transmon completo H = 4E_C(n − n_g)² − E_J cos φ ha
 livelli E_j racchiusi dagli intervalli di qraft_ra/intervallo_garantito.py. Qui:

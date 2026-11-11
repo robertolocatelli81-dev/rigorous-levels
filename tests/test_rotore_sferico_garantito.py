@@ -1,12 +1,12 @@
-"""Test di qraft_ra/rotore_sferico_garantito.py (10/11/2026). Da gtm/qraft_sfera_20261110 (PREREG, ESITO).
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Roberto Locatelli
+"""Test di qraft_ra/rotore_sferico_garantito.py (10/11/2026). Da note dell'autore (non pubblicate) (PREREG, ESITO).
 Ogni chiamata porta scadenza=20 s: un mutante che fa girare il ciclo fino a L_LIMITE/PREC_MAX deve FALLIRE (TempoScaduto),
 non bloccare il banco (banco mutanti 10/11: il mutante sul segno del pivot non dava esito)."""
 import importlib.util
 import math
-import sys
 import unittest
 from fractions import Fraction
-from pathlib import Path
 
 import numpy as np
 

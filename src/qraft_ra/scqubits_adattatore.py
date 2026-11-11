@@ -12,7 +12,7 @@ senza dirlo oltre E_J/E_C ≈ 7700 (ESITO 07/11). Qui:
       controllo="raddoppio" calcola anche a 2·ncut; errore stimato = max_j |E_j(ncut) − E_j(2·ncut)|; stato
                             NON_CONVERGENTE se supera la soglia. Le energie restituite sono quelle a ncut;
       controllo="auto"      raddoppia ncut finché lo spostamento è ≤ tol (o NCUT_LIMITE: NON_CONVERGENTE).
-    Soglia predefinita, regola "soglia-scq/1.0" (gtm/qraft_soglia_20261111/SPECIFICA_SOGLIA_v1.0.md, scritta prima
+    Soglia predefinita, regola "soglia-scq/1.0" (note dell'autore (non pubblicate), scritta prima
     del codice l'11/11/2026): unità DICHIARATA (`unita` ∈ GHz/MHz/Hz, lista chiusa; la regola è covariante);
     fisica = min(1e-6 GHz, 1e-6·(E[k−1]−E[0])) con E a 2·ncut; pavimento = 32·eps·(‖H(ncut)‖₂+‖H(2ncut)‖₂) con
     ‖H(n)‖₂ ≤ 4E_C(n+|n_g|)²+E_J (Gershgorin); soglia = max(pavimento, fisica o `tol`); l'origine del max è nel

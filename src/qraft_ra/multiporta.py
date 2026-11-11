@@ -11,7 +11,7 @@ ripulito (`--clearenv`); rlimit CPU/memoria/file nel runner; timeout del chiaman
 L'uscita è un JSON validato contro uno schema CHIUSO (chiave ignota, tipo sbagliato, NaN, lunghezza ≠ k, unità o
 contratto diversi = NON_CONFRONTABILE col motivo). Verdetto per livello: DENTRO / FUORI (con distanza) /
 NON_CONFRONTABILE (con motivo), in frazioni esatte.
-Specifica (scritta prima): gtm/qraft_multiporta_20261110/SPECIFICA_v0.1.md. Runner: qraft_ra/porte_runner.py.
+Specifica (scritta prima): note dell'autore (non pubblicate). Runner: qraft_ra/porte_runner.py.
 Cosa NON è: un certificato del calcolo; una VM (bwrap = namespace utente); un giudizio sulla fisica del solutore altrui.
 QRAFT-RA è un modello interno, non un validatore esterno."""
 from __future__ import annotations
@@ -26,7 +26,7 @@ import tempfile
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from qraft_ra.intervallo_garantito import FuoriDominio, Intervalli
 
@@ -250,26 +250,63 @@ def leggi_uscita(percorso: str) -> Tuple[Optional[object], str]:
         return None, f"uscita non JSON: {type(e).__name__}: {str(e)[:200]}"
 
 
-def _prefisso_interprete(python: str) -> Tuple[str, ...]:
-    """Cartella di installazione dell'interprete (sys.base_prefix) se sta fuori da /usr (python di uv, pyenv, runner CI):
-    va montata in sola lettura, altrimenti bwrap non trova l'eseguibile. Chiusa: mai «/», «/home», la casa dell'utente
-    o un suo antenato (esporrebbe le cartelle nascoste); mai nulla già sotto i montaggi di sistema."""
-    reale = os.path.realpath(python)
-    if any(reale == m or reale.startswith(m + "/") for m in MONTAGGI_RO):
-        return ()
+def _case_utente() -> Tuple[str, ...]:
+    """Le case dell'utente: $HOME e quella del database utenti (possono differire: sudo -E, servizi, HOME temporanea)."""
+    case = {os.path.realpath(os.path.expanduser("~"))}
     try:
-        p = subprocess.run([reale, "-I", "-c", "import sys; print(sys.base_prefix)"], capture_output=True, text=True,
-                           timeout=30, env={"PATH": "/usr/bin:/bin"})
-        prefisso = os.path.realpath(p.stdout.strip()) if p.returncode == 0 else ""
-    except (OSError, subprocess.TimeoutExpired):
-        prefisso = ""
+        import pwd
+        case.add(os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir))
+    except (ImportError, KeyError, OSError):
+        pass
+    return tuple(sorted(case))
+
+
+def _dentro(p: str, cartella: str) -> bool:
+    return p == cartella or p.startswith(cartella.rstrip("/") + "/")
+
+
+def _prefisso_interprete(python: str) -> Tuple[str, ...]:
+    """Pezzi dell'interprete da montare in sola lettura quando sta fuori da /usr (python di uv, pyenv, runner CI):
+    l'eseguibile, la libreria standard (stdlib, platstdlib) e le libpython*.so* di LIBDIR; MAI la cartella del prefisso
+    intera (con prefisso <casa>/.local o la casa stessa esporrebbe le cartelle nascoste dell'utente: NEMESIS 11/11).
+    Chiusa: prefisso mai «/», «/home», una casa dell'utente ($HOME o pwd) o un suo antenato; ogni pezzo dentro il
+    prefisso; nulla già sotto i montaggi di sistema."""
+    reale = os.path.realpath(python)
+    if any(_dentro(reale, m) for m in MONTAGGI_RO):
+        return ()
+    codice = ("import sys, sysconfig, json; v = sysconfig.get_config_var; "
+              "print(json.dumps([sys.base_prefix, sysconfig.get_path('stdlib'), sysconfig.get_path('platstdlib'), "
+              "v('LIBDIR') or '']))")
+    try:
+        p = subprocess.run([reale, "-I", "-c", codice], capture_output=True, text=True, timeout=30,
+                           env={"PATH": "/usr/bin:/bin"})
+        dati = json.loads(p.stdout) if p.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        dati = None
+    if not (isinstance(dati, list) and len(dati) == 4 and all(isinstance(x, str) for x in dati)):
+        raise FuoriDominio(f"python {python!r}: prefisso di installazione non determinabile")
+    prefisso = os.path.realpath(dati[0]) if dati[0] else ""
     if not prefisso or not os.path.isdir(prefisso) or not reale.startswith(prefisso + "/"):
         raise FuoriDominio(f"python {python!r}: prefisso di installazione non determinabile o incoerente ({prefisso!r})")
-    casa = os.path.realpath(os.path.expanduser("~"))
-    for vietato in ("/", "/home", casa):
-        if prefisso == vietato or vietato.startswith(prefisso + "/"):
+    for vietato in ("/", "/home") + _case_utente():
+        if _dentro(vietato, prefisso):
             raise FuoriDominio(f"python {python!r}: il prefisso {prefisso!r} conterrebbe la casa dell'utente: rifiutato")
-    return (prefisso,)
+    pezzi = [reale]
+    for d in dati[1:3]:
+        if d and os.path.isdir(d):
+            pezzi.append(os.path.realpath(d))
+    libdir = os.path.realpath(dati[3]) if dati[3] else ""
+    if libdir and os.path.isdir(libdir):
+        pezzi += sorted(os.path.join(libdir, n) for n in os.listdir(libdir)
+                        if n.startswith("libpython") and ".so" in n and os.path.isfile(os.path.join(libdir, n)))
+    fuori = []
+    for x in dict.fromkeys(os.path.realpath(x) for x in pezzi):
+        if any(_dentro(x, m) for m in MONTAGGI_RO):
+            continue                                   # già montato (es. stdlib che punta a /usr/lib)
+        if not _dentro(x, prefisso) or x == prefisso:
+            raise FuoriDominio(f"python {python!r}: {x!r} fuori dal prefisso {prefisso!r} o uguale a esso: rifiutato")
+        fuori.append(x)
+    return tuple(fuori)
 
 
 def esegui_porta(r: Richiesta, python: Optional[str] = None) -> Uscita:
@@ -300,7 +337,7 @@ def esegui_porta(r: Richiesta, python: Optional[str] = None) -> Uscita:
         for sp in r.site_packages:
             sp = os.path.realpath(sp)
             cmd += ["--ro-bind", sp, sp]
-        for pr in _prefisso_interprete(python):                    # interprete fuori da /usr (venv uv, CI): solo il suo prefisso, ro
+        for pr in _prefisso_interprete(python):                    # interprete fuori da /usr (venv uv, CI): solo i suoi pezzi, ro
             cmd += ["--ro-bind", pr, pr]
         cmd += ["--ro-bind", work, "/tmp/work", "--bind", percorso, "/tmp/work/uscita.json",
                 "--setenv", "HOME", "/tmp/casa_assente", "--setenv", "PATH", "/usr/bin:/bin",
@@ -345,7 +382,7 @@ class Verdetto:
 def confronta(iv: Intervalli, unita_intervalli: str, u: Uscita, tolleranza: float = 0.0) -> Verdetto:
     """Confronto esatto (Fraction): E_j dell'uscita convertito nell'unità degli intervalli con fattori 10^n.
     `tolleranza` (stessa unità degli intervalli, ≥ 0, predefinita 0) è il rumore DICHIARATO dal chiamante per il
-    solutore float (eigvalsh: ~eps·‖H‖, misurato 1e-13 GHz a ncut 30 in gtm/qraft_regime_dispositivi_20261110): un
+    solutore float (eigvalsh: ~eps·‖H‖, misurato 1e-13 GHz a ncut 30 in note dell'autore (non pubblicate)): un
     livello fuori di meno è DENTRO_TOLLERANZA, con la distanza; oltre è FUORI. Lista chiusa dei verdetti."""
     if not isinstance(iv, Intervalli):
         raise FuoriDominio("atteso Intervalli")

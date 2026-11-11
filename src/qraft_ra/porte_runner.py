@@ -2,7 +2,7 @@
 # Copyright 2026 Roberto Locatelli
 """qraft_ra/porte_runner.py — runner delle PORTE della multiporta: gira DENTRO la sandbox (bwrap), mai nel processo di
 QRAFT-RA. Legge /tmp/work/richiesta.json, esegue la porta (lista chiusa), scrive /tmp/work/uscita.json.
-Specifica: gtm/qraft_multiporta_20261110/SPECIFICA_v0.1.md (contratto "qraft-porta/0.1").
+Specifica: note dell'autore (non pubblicate) (contratto "qraft-porta/0.1").
 Le porte `prova_*` esistono SOLO per i controlli positivi della sandbox (rete, scrittura, tempo, memoria, uscita sporca,
 solutore sbagliato). Nessuna di esse è un solutore.
 Questo file non importa nulla di QRAFT-RA: è autonomo (numpy e i solutori arrivano dal site-packages dichiarato)."""
@@ -56,7 +56,7 @@ def porta_scqubits_transmon(r):
 def porta_diatomic_py(r):
     """Molecola ¹Σ via diatomic-py 2.1.0 nel settore M_F richiesto. Mappa c3 → −c3: il codice diatomic-py usa
     +√6 c3 T²(C)·T²(I1,I2), il suo articolo (eq. 5b), Aldegunde 2008 e Gregory 2016 il segno opposto
-    (gtm/qraft_iperfine_20261110/ESITO.md): la porta lo dichiara nel campo versione_solutore."""
+    (note dell'autore (non pubblicate)): la porta lo dichiara nel campo versione_solutore."""
     import numpy as np
     from diatomic import operators as op
     from diatomic.systems import SingletSigmaMolecule
@@ -195,7 +195,7 @@ def porta_prova_uscita_sporca(r):
     return out, "sporca", {"chiave_ignota": 1}
 
 
-# ── porte dei bersagli (11/11/2026, gtm/qraft_bersagli_github_20261111/PREREG_A.md) ──────────────────────────────────
+# ── porte dei bersagli (11/11/2026, note dell'autore (non pubblicate)) ──────────────────────────────────
 def porta_metal_hcpb(r):
     """qiskit-metal Hcpb (transmon_charge_basis.py, letto dal repo, montato in sola lettura): eigh_tridiagonal su
     4E_C(n−n_g)² − (E_J/2)(|n⟩⟨n+1| + h.c.), n ∈ [−nlevels, nlevels+1]."""

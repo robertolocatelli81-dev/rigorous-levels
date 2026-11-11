@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Roberto Locatelli
 """Test della porta centrex_tlf (qraft_ra/porte_runner.py) contro la molecola garantita (NEMESIS blocco B, 11/11/2026).
 Richiede bwrap e il venv isolato con centrex-tlf 0.4.0 (QRAFT_BERSAGLI_VENV, default: cartella .venvs/qraft_bersagli nella casa dell'utente): altrimenti skip.
 Mappa delle convenzioni (identità di operatori, non adattamento): c3_nostro = 5·c3_CeNTREX; Debye = 1e-21/c C·m (CODATA esatto)."""
@@ -5,9 +7,7 @@ import glob
 import os
 import pwd
 import shutil
-import sys
 import unittest
-from pathlib import Path
 
 
 from qraft_ra import molecola_iperfine_garantita as MI  # noqa: E402

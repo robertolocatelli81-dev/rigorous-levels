@@ -52,7 +52,8 @@ three conditions:
 3. Arb/FLINT rounds correctly, and sympy's 3j symbols are exact. This is assumed, not proven here, and there is no
    formal verification of this code: tests and mutation testing reduce the risk of a defect, they do not remove it.
 
-Within these conditions an interval marked `GARANTITO` has width ≤ the requested one (default 1e-12 relative);
+Within these conditions an interval marked `GARANTITO` has width ≤ the requested one (default 1e-12: absolute, in the
+unit of E_C, for the charge-basis rotor; relative to max(|E_j|, B) for the sphere and the molecule);
 `LARGO` means valid but wider than requested (the molecule keeps trying larger truncations while the width halves).
 
 ## What it does not do
@@ -142,17 +143,19 @@ Each one was found by comparing a public solver with the guaranteed intervals an
 
 1. **durham-qlm/diatomic-py #15** — https://github.com/durham-qlm/diatomic-py/issues/15. The code of
    `tensor_nuclear` (2.1.0) uses +√6 c₃ T²(C)·T²(I₁,I₂); the package's paper (eq. 5b), Aldegunde et al. 2008 and
-   Gregory et al. 2016 use the opposite sign. With the paper's sign the 16 measured RbCs transitions of Gregory et al.
-   2016 (Table I) are reproduced within 100 Hz (intervals 7 mHz wide); with the code's sign 1 of 16. Reproduce:
-   `tests/test_molecola_iperfine_garantita.py::TestGregory2016` and `TestCostruzioneContraDiatomicPy` (needs
-   `pip install diatomic-py==2.1.0`).
+   Gregory et al. 2016 use the opposite sign. With the paper's sign the 16 RbCs transitions of Gregory et al. 2016
+   (Table I) are reproduced within 100 Hz of their model values f_the (intervals 7 mHz wide); with the code's sign 1 of
+   16 (the 16-line script is in the issue). In this package `tests/test_molecola_iperfine_garantita.py::TestGregory2016`
+   checks the stretched line M_F = +5 → +6 at 181.541 G (within 100 Hz with the paper's sign, about 800 Hz off with the
+   code's), and `TestCostruzioneContraDiatomicPy` compares the matrix elements (needs `pip install diatomic-py==2.1.0`).
 2. **qiskit-community/qiskit-metal #1252** — https://github.com/qiskit-community/qiskit-metal/issues/1252.
    `mathieu_level(m, ng, Ej, Ec)` returns the energy of another level for some (m, Ej/Ec) at n_g = 0 and 1/2: the
-   cause is `scipy.special.mathieu_a/mathieu_b` (522 wrong values on m ≤ 12, |q| ≤ 400 with scipy ≤ 1.18.1; fixed on
-   scipy main by PR #25128, milestone 2.0.0). Reproduce with the port `metal_mathieu` (mount their
+   cause is `scipy.special.mathieu_a/mathieu_b` (522 wrong values on m ≤ 12, |q| ≤ 400, identical with scipy 1.10.1, 1.14.1, 1.15.0 and
+   1.18.1, the releases tested; fixed on scipy main by PR #25128, milestone 2.0.0). Reproduce with the port `metal_mathieu` (mount their
    `transmon_CPB_analytic.py` and `transmon_charge_basis.py` in a folder named `site-packages/`): case E_C = 0.16792,
-   E_J = 7.01912 GHz, n_g = 0.5, m = 5 → 2.52391 GHz (the value of m = 3), while the guaranteed interval is
-   [6.277382…]; `Hcpb(nlevels=15)` on the same cases is inside the intervals except 7 of 50 at E_J/E_C ≥ 285 (≤ 2.9 kHz).
+   E_J = 7.01912 GHz, n_g = 0.5, m = 5 → 2.524025 GHz (the value of m = 3), while the guaranteed interval of
+   level 5 is [6.277480…]; `Hcpb(nlevels=15)` on the author's 50 transmons is inside the intervals except 7 of 50 at
+   E_J/E_C ≥ 285 (≤ 2.9 kHz).
 3. **scqubits/scqubits #334** (comment) — https://github.com/scqubits/scqubits/issues/334#issuecomment-6796563509.
    The first scipy release whose sparse `eigsh` silently omits the zero eigenvalue is 1.15.0 (bisection 1.10.1,
    1.13.1, 1.14.1 right; 1.15.0, 1.15.3, 1.16.2, 1.17.1, 1.18.1 wrong; independent of the start vector). This is a
@@ -160,10 +163,11 @@ Each one was found by comparing a public solver with the guaranteed intervals an
    the port `scqubits_transmon` falls inside the intervals (0 of 200 outside at ncut = 30 in the device regime).
 
 Two more measurements with no report (the other side already documents or fixed them): CeNTREX-TlF's default
-`Jmax = J + 2` errs by 4.26 MHz at 10 kV/cm and 3.9 GHz at 30 kV/cm with no warning (their AGENTS.md already tells
-users to raise Jmax); SQcircuit 1.0.0's single transmon is inside the intervals within 3e-13 GHz once the junction's
+`Jmax = J + 2` errs by 4.26 MHz at 10 kV/cm with no warning; at 30 kV/cm the result of their API is 3.9 GHz off but
+comes with their warning "Ambiguous eigenstate assignment" (the truncation alone accounts for 1.1 GHz there); their
+AGENTS.md already tells users to raise Jmax at tens of kV/cm; SQcircuit 1.0.0's single transmon is inside the intervals within 3e-13 GHz once the junction's
 own capacitance (1e-20 F) is included (issue #5 there expected the first-order anharmonicity −E_C, the exact one at
-E_J/E_C = 26 is −0.466 GHz).
+E_J/E_C = 26.3 and n_g = 0.3, the values of the issue's code, is −0.466 GHz).
 
 ## Measurements
 
@@ -185,9 +189,11 @@ adapter, 0 false alarms.
 | Multiport sandbox, positive controls | network reached outside / blocked inside; file written outside / blocked inside; loop → timeout; 3 GiB → MemoryError; unknown key → `NON_VALIDA`; without bwrap → `SandboxAssente` |
 | Duffing against transmon, 200 transmons (E_J/E_C 5–500) | |δ_3| ≥ 1 MHz in 200 of 200 (median 34 MHz, 90th percentile 1.18 GHz); δ_3 = 0 near E_J/E_C ≈ 30.56 at n_g = 0, so this is a property of the sample, not of the regime |
 
-Mutation testing (author's benches, copies with a green control, PYTHONDONTWRITEBYTECODE=1): charge-basis rotor
+Mutation testing (author's benches in the author's repository, not re-run on this tree; copies with a green control,
+PYTHONDONTWRITEBYTECODE=1): charge-basis rotor
 8 of 8; sphere 16 of 16 (+ 14 of 14 by the reviewer); molecule 24 of 24 (+ 21 of 21); adapter 18 of 18; multiport
-23 of 24 (+ 1 equivalent, declared; 2 of the reviewer's alive: `--new-session`, `--die-with-parent`, untested);
+23 of 24 (+ 1 equivalent, declared; 2 of the reviewer's alive: `--new-session`, `--die-with-parent`, untested; the
+mount of an interpreter outside /usr is covered by a separate bench of 2026-11-11, see CHANGELOG);
 Duffing 22 of 24 (+ 2 equivalent).
 
 ## Tests
@@ -204,14 +210,15 @@ run from `tests/` with the command above, `bwrap` 0.8.0 present:
 
 | Python | numpy, scipy, python-flint | scqubits | Result |
 |---|---|---|---|
-| 3.11.2 | 2.4.6, 1.17.1, 0.9.0 | 4.3.1 | 151 tests, OK, 5 skipped (3 `test_porta_centrex_tlf` without `QRAFT_BERSAGLI_VENV`, 2 diatomic-py absent) |
-| 3.12.15 | 2.5.4, 1.18.1, 0.9.0 | absent | 151 tests, OK, 15 skipped (the 5 above + 10 of the scqubits adapter and README example) |
-| 3.13.15 | 2.5.4, 1.18.1, 0.9.0 | 4.3.1 | 151 tests, OK, 5 skipped |
-| 3.14.8 | 2.5.4, 1.18.1, 0.9.0 | absent | 151 tests, OK, 15 skipped |
+| 3.11.2 | 2.4.6, 1.17.1, 0.9.0 | 4.3.1 | 157 tests, OK, 6 skipped (3 `test_porta_centrex_tlf` without `QRAFT_BERSAGLI_VENV`, 2 diatomic-py absent, 1 interpreter under /usr: no interpreter piece to mount) |
+| 3.12.15 | 2.5.4, 1.18.1, 0.9.0 | absent | 157 tests, OK, 15 skipped (the first 5 above + 10 of the scqubits adapter and README example) |
+| 3.13.15 | 2.5.4, 1.18.1, 0.9.0 | 4.3.1 | 157 tests, OK, 5 skipped |
+| 3.14.8 | 2.5.4, 1.18.1, 0.9.0 | absent | 157 tests, OK, 15 skipped |
 | 3.11.2 with `QRAFT_BERSAGLI_VENV` (venv with centrex-tlf 0.4.0) | | | `test_porta_centrex_tlf`: 4 tests, OK |
 
-Python 3.10 was not available on the author's machine: the CI matrix includes it, not yet run. The 25 sandbox tests
-ran with bubblewrap on all four versions (1 skipped on each: `test_scqubits_e_diatomic` needs both extras).
+Python 3.10 was not available on the author's machine: the CI matrix includes it, not yet run. With `bwrap` removed
+from PATH, Python 3.11.2 gives 157 tests, OK, 20 skipped: 16 with the reason "bwrap assente" (15 of the 31 tests of
+`test_multiporta`, 1 of `test_scqubits_adattatore`), plus the 3 of `test_porta_centrex_tlf` and 1 of diatomic-py.
 
 ## Limits
 
@@ -222,7 +229,9 @@ ran with bubblewrap on all four versions (1 skipped on each: `test_scqubits_e_di
   reports are in the author's repository), not by a human mathematician.
 - Molecule: fields along z only; no AC polarizability; the CeNTREX-TlF Zeeman convention μ_J/J is not covered for
   J ≥ 2 (declared); quadrupole with I < 1 is refused, not zeroed.
-- Multiport: user-namespace sandbox, not a VM; /etc is mounted read-only (what any user process reads); the test ports
+- Multiport: user-namespace sandbox, not a VM; /etc is mounted read-only (what any user process reads); an interpreter
+  outside /usr (uv, pyenv, CI) is mounted read-only piece by piece (executable, standard library, libpython), never its
+  whole prefix, and a prefix that is or contains the user's home is refused; the test ports
   `prova_*` are controls, not solvers.
 - Adapter: the float floor is a plausible bound (16× the nominal tolerance of LAPACK ?stebz), not a proof.
 - Speed: see above.

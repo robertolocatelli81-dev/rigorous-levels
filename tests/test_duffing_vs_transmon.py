@@ -1,9 +1,9 @@
-"""Test di qraft_ra/duffing_vs_transmon.py (11/11/2026). Spec: gtm/qraft_duffing_20261111/SPECIFICA_DUFFING_v0.1.md."""
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Roberto Locatelli
+"""Test di qraft_ra/duffing_vs_transmon.py (11/11/2026). Spec: note dell'autore (non pubblicate)."""
 import importlib.util
-import sys
 import unittest
 from fractions import Fraction
-from pathlib import Path
 
 import numpy as np
 

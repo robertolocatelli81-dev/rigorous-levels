@@ -1,4 +1,6 @@
-"""Test di qraft_ra/multiporta.py + qraft_ra/porte_runner.py (10/11/2026). Specifica: gtm/qraft_multiporta_20261110/.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Roberto Locatelli
+"""Test di qraft_ra/multiporta.py + qraft_ra/porte_runner.py (10/11/2026). Specifica: note dell'autore (non pubblicate).
 Controlli positivi S1-S7 della specifica: ognuno deve POTER fallire (il runner fuori sandbox fa ciò che dentro è bloccato)."""
 import importlib.util
 import json
@@ -9,7 +11,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
 
 
 from qraft_ra import multiporta as MP  # noqa: E402
@@ -403,6 +404,130 @@ class TestBersagliTroncamentoChiuso(unittest.TestCase):
             MP.Richiesta("centrex_tlf", dict(self.ROT), 4, {})
         with self.assertRaises(MP.FuoriDominio):
             MP.Richiesta("centrex_tlf", {**self.TLF, "Jmax": -1}, 4, {})
+
+
+class TestPrefissoInterprete(unittest.TestCase):
+    """NEMESIS 11/11 (pubblicazione 0.2.0): un python con sys.base_prefix = <casa>/.local (o = la casa, con HOME diversa) faceva
+    montare l'intera cartella: la porta leggeva <casa>/.local/share/keyrings. Si montano solo eseguibile, stdlib e libpython."""
+
+    def _interprete(self, prefisso):
+        v = f"python{sys.version_info.major}.{sys.version_info.minor}"
+        os.makedirs(os.path.join(prefisso, "bin"))
+        os.makedirs(os.path.join(prefisso, "lib"))
+        exe = os.path.join(prefisso, "bin", v)
+        shutil.copy2(os.path.realpath(sys.executable), exe)
+        import sysconfig
+        os.symlink(sysconfig.get_path("stdlib"), os.path.join(prefisso, "lib", v))
+        bp = subprocess.run([exe, "-I", "-c", "import sys; print(sys.base_prefix)"], capture_output=True, text=True,
+                            env={"PATH": "/usr/bin:/bin"}).stdout.strip()
+        if os.path.realpath(bp) != os.path.realpath(prefisso):
+            self.skipTest(f"l'interprete copiato non riconosce il prefisso ({bp!r})")
+        return exe
+
+    def test_prefisso_casa_local_mai_intero(self):
+        casa = tempfile.mkdtemp(prefix="casa_finta_")
+        vecchio = os.environ.get("HOME")
+        os.environ["HOME"] = casa
+        try:
+            prefisso = os.path.join(casa, ".local")
+            os.makedirs(os.path.join(prefisso, "share", "keyrings"))
+            exe = self._interprete(prefisso)
+            import sysconfig
+            stdlib_reale = os.path.realpath(sysconfig.get_path("stdlib"))
+            if not any(stdlib_reale.startswith(m + "/") for m in MP.MONTAGGI_RO):
+                with self.assertRaises(MP.FuoriDominio):     # stdlib (symlink) fuori dal prefisso: rifiuto, nessun montaggio
+                    MP._prefisso_interprete(exe)
+                return
+            pezzi = MP._prefisso_interprete(exe)             # stdlib già sotto /usr: deve montare solo l'eseguibile
+            segreto = os.path.realpath(os.path.join(prefisso, "share", "keyrings"))
+            self.assertIn(os.path.realpath(exe), pezzi)
+            for x in pezzi:                                   # nessun montaggio contiene la cartella del segreto
+                self.assertFalse(segreto == x or segreto.startswith(x + "/"), (x, pezzi))
+                self.assertNotEqual(x, os.path.realpath(prefisso))
+                self.assertTrue(x.startswith(os.path.realpath(prefisso) + "/"), (x, pezzi))   # mai fuori dal prefisso
+        finally:
+            if vecchio is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = vecchio
+            shutil.rmtree(casa, ignore_errors=True)
+
+    def test_prefisso_uguale_alla_casa_rifiutato(self):
+        casa = tempfile.mkdtemp(prefix="casa_finta_")
+        vecchio = os.environ.get("HOME")
+        os.environ["HOME"] = casa
+        try:
+            exe = self._interprete(casa)                      # python installato con --prefix=$HOME
+            with self.assertRaisesRegex(MP.FuoriDominio, "casa dell'utente"):
+                MP._prefisso_interprete(exe)
+        finally:
+            if vecchio is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = vecchio
+            shutil.rmtree(casa, ignore_errors=True)
+
+    def test_sonda_malformata_rifiutata(self):
+        """La sonda dell'interprete è un JSON di 4 stringhe: altro (lunghezza, tipo, non JSON) = FuoriDominio, mai crash."""
+        d = tempfile.mkdtemp(prefix="finto_python_")
+        try:
+            os.makedirs(os.path.join(d, "bin"))
+            finto = os.path.join(d, "bin", "python3")
+            for uscita in (json.dumps([d]), json.dumps([d, d, d, 4]), "non json", json.dumps({"a": d}), json.dumps([d, d, d, ""])):
+                with open(finto, "w") as f:
+                    f.write("#!/bin/sh\necho '" + uscita + "'\n")
+                os.chmod(finto, 0o755)
+                with self.assertRaises(MP.FuoriDominio, msg=uscita):
+                    MP._prefisso_interprete(finto)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_pezzi_chiusi_stdlib_platstdlib_libpython(self):
+        """Lista chiusa dei pezzi: eseguibile, stdlib, platstdlib (anche se diversa), libpython*.so* di LIBDIR; altro no."""
+        d = os.path.realpath(tempfile.mkdtemp(prefix="finto_python_"))
+        try:
+            for x in ("bin", "lib/a", "lib/b", "lib/c"):
+                os.makedirs(os.path.join(d, x))
+            for n in ("libpython3.99.so.1.0", "libaltro.so", "README"):
+                open(os.path.join(d, "lib/c", n), "w").close()
+            finto = os.path.join(d, "bin", "python3")
+            with open(finto, "w") as f:
+                f.write("#!/bin/sh\necho '" + json.dumps([d, d + "/lib/a", d + "/lib/b", d + "/lib/c"]) + "'\n")
+            os.chmod(finto, 0o755)
+            self.assertEqual(set(MP._prefisso_interprete(finto)),
+                             {finto, d + "/lib/a", d + "/lib/b", d + "/lib/c/libpython3.99.so.1.0"})
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    @unittest.skipUnless(BWRAP, "bwrap assente")
+    def test_pezzi_interprete_sola_lettura(self):
+        """I pezzi montati dell'interprete (eseguibile, stdlib) non sono scrivibili dalla porta."""
+        pezzi = MP._prefisso_interprete(os.path.realpath(sys.executable))
+        cartelle = [x for x in pezzi if os.path.isdir(x)]
+        if not cartelle:
+            self.skipTest("interprete sotto /usr: nessun pezzo montato")
+        bersaglio = os.path.join(cartelle[0], f"qraft_nemesis_prova_{os.getpid()}.txt")
+        try:
+            u = MP.esegui_porta(richiesta("prova_ostile", troncamento={"modo": "scrivi", "percorso": bersaglio}))
+            esiste = os.path.exists(bersaglio)
+        finally:
+            if os.path.exists(bersaglio):
+                os.remove(bersaglio)
+        self.assertIn("scrivi: bloccato", u.motivo)
+        self.assertFalse(esiste)
+
+    def test_case_utente_anche_da_pwd(self):
+        import pwd
+        vecchio = os.environ.get("HOME")
+        os.environ["HOME"] = tempfile.mkdtemp(prefix="home_diversa_")
+        try:
+            self.assertIn(os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir), MP._case_utente())
+        finally:
+            shutil.rmtree(os.environ["HOME"], ignore_errors=True)
+            if vecchio is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = vecchio
 
 
 if __name__ == "__main__":

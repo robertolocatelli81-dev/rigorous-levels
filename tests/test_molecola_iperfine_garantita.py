@@ -1,10 +1,10 @@
-"""Test di qraft_ra/molecola_iperfine_garantita.py (10/11/2026). PREREG e misure: gtm/qraft_iperfine_20261110/.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Roberto Locatelli
+"""Test di qraft_ra/molecola_iperfine_garantita.py (10/11/2026). PREREG e misure: note dell'autore (non pubblicate).
 Ogni chiamata porta scadenza: un mutante che fa girare il ciclo a vuoto deve FALLIRE, non bloccare il banco."""
 import importlib.util
-import sys
 import unittest
 from fractions import Fraction
-from pathlib import Path
 
 import numpy as np
 

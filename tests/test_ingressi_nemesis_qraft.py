@@ -1,10 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Roberto Locatelli
 """NEMESIS 10/11/2026: ingressi che uscivano dal dominio con un'eccezione diversa da FuoriDominio/TempoScaduto o che
 ignoravano la scadenza (molecola_iperfine_garantita e rotore_sferico_garantito). Ogni caso con un tetto di tempo."""
 import importlib.util
-import sys
 import time
 import unittest
-from pathlib import Path
 
 FLINT = importlib.util.find_spec("flint") is not None
 if FLINT:

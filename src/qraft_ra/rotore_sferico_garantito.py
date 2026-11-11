@@ -20,10 +20,9 @@ lì f è crescente e il minimo del blocco esterno è f(L+1); se L raggiunge N_fi
 vengono dalla stessa matrice finita. Con D_c = 0 la base è infinita come prima.
 Lavora in unità assolute (le stesse di B e D, per esempio MHz): nessuna divisione in virgola mobile entra nella
 dimostrazione. Ipotesi dichiarate: la H è quella dei parametri float64 esatti; correttezza di Arb/FLINT.
-Prova di concetto e misure: gtm/qraft_sfera_20261110/ (PREREG, ESITO).
+Prova di concetto e misure: note dell'autore (non pubblicate) (PREREG, ESITO).
 
-Cosa NON dice: che la H descriva una molecola. Non contiene la struttura iperfine (per quella: diatomic-py, integrazione
-in qraft_ra/rotore_sferico_iperfine.py).
+Cosa NON dice: che la H descriva una molecola. Non contiene la struttura iperfine (per quella: qraft_ra/molecola_iperfine_garantita.py).
 QRAFT-RA è un modello interno, non un validatore esterno.
 """
 from __future__ import annotations

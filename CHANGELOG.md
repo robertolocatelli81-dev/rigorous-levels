@@ -26,8 +26,9 @@ new modules are in Italian, as in the source they were extracted from):
   an independent reviewer. The old relative rule (up to 18 kHz in the device regime) is removed. Optional engine
   `motore="sandbox"` runs scqubits through the multiport.
 - `multiporta` and `porte_runner` (contract "qraft-porta/0.1", specification v0.2): an external solver runs in a
-  bubblewrap sandbox (no network, separate PID/IPC namespaces, only /usr, /lib, /lib64, /bin, /etc and the declared
-  site-packages mounted read-only, tmpfs HOME, 256 MiB tmpfs, rlimits, timeout, minimal environment also for bwrap
+  bubblewrap sandbox (no network, separate PID/IPC namespaces, only /usr, /lib, /lib64, /bin, /etc, the declared
+  site-packages and, for an interpreter outside /usr, its executable, standard library and libpython (never its whole
+  prefix) mounted read-only, tmpfs HOME, 256 MiB tmpfs, rlimits, timeout, minimal environment also for bwrap
   itself), returns a JSON validated against a closed schema (unknown key, NaN, duplicate key, wrong length = not
   comparable, with the reason), and is compared level by level with the intervals in exact arithmetic, with a
   declared float tolerance. Ports: numpy reference, scqubits, diatomic-py, qiskit-metal `Hcpb` and `mathieu_level`
@@ -37,6 +38,22 @@ new modules are in Italian, as in the source they were extracted from):
 - `duffing_vs_transmon`: guaranteed per-level error of the Duffing model ω a†a + (α/2) a†a†aa against the full
   transmon, with ω and α taken from the guaranteed intervals of the first three levels ("spettro") or from Koch et al.
   2007 first order ("koch"). On 200 transmons of the device regime |δ_3| ≥ 1 MHz in 200 of 200 (median 34 MHz).
+
+Fixed before publication (adversarial review of 2026-11-11):
+
+- Multiport: an interpreter outside /usr had its whole installation prefix mounted read-only; with a prefix equal to
+  `<home>/.local` (Python built with `--prefix=$HOME/.local`), or equal to the home itself when `$HOME` differs from
+  the account's home, a port could read the user's hidden folders (measured: a fake keyring file read in 2 of 2 cases).
+  Now only the executable, the standard library and libpython are mounted, and the home is taken from both `$HOME` and
+  the user database. Tests: `TestPrefissoInterprete` (6 tests, they fail on the previous code). Mutation testing of the
+  new lines on Python 3.11 and 3.12: 12 of 15 mutants killed, 3 equivalent (early return for /usr, a redundant
+  coherence check, `-I` on the probe), checked by reasoning and on 305 inputs (0 differences; a non-equivalent control
+  mutant differs on 8).
+- `requirements/ci.txt`: numpy 2.5.4 and scipy 1.18.1 have no wheels for Python 3.10 and 3.11; those two jobs now pin
+  numpy 2.2.6 / scipy 1.15.3 (3.10) and numpy 2.4.6 / scipy 1.17.1 (3.11).
+- README: numbers of the qiskit-metal example, the CeNTREX-TlF warning at 30 kV/cm, what `TestGregory2016` checks, the
+  scipy versions tested, the sandbox test count and the width default corrected; CONTRIBUTING test command; NOTICE;
+  provenance hashes in `FILE_LIST.tsv`; license headers of the test files; references to the author's unpublished notes.
 
 Changed:
 

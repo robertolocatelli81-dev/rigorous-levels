@@ -10,7 +10,7 @@ Base disaccoppiata |N M_N⟩|I₁ M₁⟩|I₂ M₂⟩ con campi E e B lungo z: 
 settore M_F per volta. Forma di Aldegunde et al., PRA 78, 033434 (2008) eq. 3 (+c₃ I₁·T·I₂, T dipolare) e di
 Blackmore et al. 2022 (articolo di diatomic-py, arXiv:2205.05686, eq. 5b: −c₃√6 T²(C)·T²(I_A,I_B)): le due coincidono
 perché √6 T²(C)·T²(I₁,I₂) = 3(I₁·r̂)(I₂·r̂) − I₁·I₂ = −I₁·T·I₂.
-SEGNO MISURATO (gtm/qraft_iperfine_20261110/ESITO.md, 10/11/2026): il CODICE diatomic-py 2.1.0 (`tensor_nuclear`)
+SEGNO MISURATO (note dell'autore (non pubblicate), 10/11/2026): il CODICE diatomic-py 2.1.0 (`tensor_nuclear`)
 usa +√6 c₃, cioè il segno opposto al suo articolo; con il segno dell'articolo le 16 transizioni di Gregory et al. 2016
 (PRA 94, 041403(R)) sono riprodotte entro 94 Hz, con quello del codice no (fino a 1,96 kHz). Qui vale il segno
 dell'articolo; il confronto con diatomic-py nei test passa c₃ → −c₃ (dichiarato).
@@ -31,7 +31,7 @@ Garanzia (Teschl, Teor. 4.12(i) e Cor. 4.11; argomento di qraft_ra/intervallo_ga
   - conteggi «autovalori < x» con LDLᵀ a banda in palle Arb; pivot incerto → precisione raddoppiata o punto spostato.
 Con D > 0 il modello è DEFINITO su N ≤ N_fis = max{N : N(N+1) < B/(2D)} (dichiarato, come nella sfera).
 Ipotesi dichiarate: le costanti float64 sono esatte; correttezza di Arb/FLINT e di sympy (3j).
-PREREG e misure: gtm/qraft_iperfine_20261110/.
+PREREG e misure: note dell'autore (non pubblicate).
 
 Cosa NON dice: che la H descriva la molecola (termini mancanti: polarizzabilità AC, campi non paralleli).
 QRAFT-RA è un modello interno, non un validatore esterno.

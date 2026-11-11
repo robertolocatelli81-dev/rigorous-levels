@@ -5,4 +5,6 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
 Dependencies are not included and keep their own licenses, as declared in their package metadata (read on
 2026-11-10): python-flint 0.9.0 "MIT AND LGPL-3.0-or-later"; numpy 2.4.6 "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND
-CC0-1.0"; scipy, scqubits (optional) and mpmath (tests only): BSD licenses.
+CC0-1.0"; scipy, sympy, scqubits (optional) and mpmath (tests only): BSD licenses. Optional packages of the
+multiport ports (read on 2026-11-11): SQcircuit and pyEPR-quantum BSD, centrex-tlf MIT, diatomic-py BSD-3-Clause
+(license file of its repository).
