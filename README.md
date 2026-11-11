@@ -210,15 +210,20 @@ run from `tests/` with the command above, `bwrap` 0.8.0 present:
 
 | Python | numpy, scipy, python-flint | scqubits | Result |
 |---|---|---|---|
-| 3.11.2 | 2.4.6, 1.17.1, 0.9.0 | 4.3.1 | 157 tests, OK, 6 skipped (3 `test_porta_centrex_tlf` without `QRAFT_BERSAGLI_VENV`, 2 diatomic-py absent, 1 interpreter under /usr: no interpreter piece to mount) |
-| 3.12.15 | 2.5.4, 1.18.1, 0.9.0 | absent | 157 tests, OK, 15 skipped (the first 5 above + 10 of the scqubits adapter and README example) |
-| 3.13.15 | 2.5.4, 1.18.1, 0.9.0 | 4.3.1 | 157 tests, OK, 5 skipped |
-| 3.14.8 | 2.5.4, 1.18.1, 0.9.0 | absent | 157 tests, OK, 15 skipped |
+| 3.11.2 | 2.4.6, 1.17.1, 0.9.0 | 4.3.1 | 161 tests, OK, 6 skipped (3 `test_porta_centrex_tlf` without `QRAFT_BERSAGLI_VENV`, 2 diatomic-py absent, 1 interpreter under /usr: no interpreter piece to mount) |
+| 3.12.15 | 2.5.4, 1.18.1, 0.9.0 | absent | 161 tests, OK, 15 skipped (the first 5 above + 10 of the scqubits adapter and README example) |
+| 3.13.15 | 2.5.4, 1.18.1, 0.9.0 | 4.3.1 | 161 tests, OK, 5 skipped |
+| 3.14.8 | 2.5.4, 1.18.1, 0.9.0 | absent | 161 tests, OK, 15 skipped |
 | 3.11.2 with `QRAFT_BERSAGLI_VENV` (venv with centrex-tlf 0.4.0) | | | `test_porta_centrex_tlf`: 4 tests, OK |
 
-Python 3.10 was not available on the author's machine: the CI matrix includes it, not yet run. With `bwrap` removed
-from PATH, Python 3.11.2 gives 157 tests, OK, 20 skipped: 16 with the reason "bwrap assente" (15 of the 31 tests of
-`test_multiporta`, 1 of `test_scqubits_adattatore`), plus the 3 of `test_porta_centrex_tlf` and 1 of diatomic-py.
+With `bwrap` removed from PATH, Python 3.11.2 gives 161 tests, OK, 20 skipped: 16 with the reason "bwrap assente"
+(15 of the 35 tests of `test_multiporta`, 1 of `test_scqubits_adattatore`), plus the 3 of `test_porta_centrex_tlf` and 1
+of diatomic-py.
+
+CI (GitHub Actions, ubuntu-24.04, bubblewrap 0.9.0 with unprivileged user namespaces allowed, `requirements/ci.txt`
+with scqubits 4.3.1), run 43070297418 on commit d45b607, 2026-11-11: Python 3.10.22, 3.11.18, 3.12.16, 3.13.18 and
+3.14.10 each give 161 tests, OK, 5 skipped (3 `test_porta_centrex_tlf` without `QRAFT_BERSAGLI_VENV`, 2 diatomic-py
+absent); no sandbox test is skipped. Python 3.10 was measured only there.
 
 ## Limits
 
