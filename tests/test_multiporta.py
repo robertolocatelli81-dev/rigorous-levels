@@ -546,6 +546,7 @@ class TestProfonditaUscita(unittest.TestCase):
 
     def test_limite_esatto(self):
         L = MP.USCITA_MAX_PROFONDITA
+        self.assertEqual(L, 32)                                              # il numero dichiarato in README e CHANGELOG
         for apri, chiudi in (("[", "]"), ('{"a":', "}")):
             doc, motivo = self._scrivi_e_leggi(apri * L + "1" + chiudi * L)
             self.assertIsNotNone(doc, motivo)                                   # controllo positivo: L livelli passano

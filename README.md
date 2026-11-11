@@ -223,7 +223,8 @@ of diatomic-py.
 CI (GitHub Actions, ubuntu-24.04, bubblewrap 0.9.0 with unprivileged user namespaces allowed, `requirements/ci.txt`
 with scqubits 4.3.1), run 43070297418 on commit d45b607, 2026-11-11: Python 3.10.22, 3.11.18, 3.12.16, 3.13.18 and
 3.14.10 each give 161 tests, OK, 5 skipped (3 `test_porta_centrex_tlf` without `QRAFT_BERSAGLI_VENV`, 2 diatomic-py
-absent); no sandbox test is skipped. Python 3.10 was measured only there.
+absent); no test is skipped for lack of the sandbox (the 3 CeNTREX tests and the diatomic-py test also use the
+sandbox, but their packages are not installed in CI). Python 3.10 was measured only there.
 
 ## Limits
 

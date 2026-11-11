@@ -60,7 +60,8 @@ Changed:
 - `pyproject.toml`: dependency on sympy (3j symbols); optional extra `porte` with the external solvers.
 - CI: Python 3.10–3.14 (python-flint 0.9.0 wheels exist for 3.10–3.14); bubblewrap installed on the runner and
   unprivileged user namespaces allowed (Ubuntu 24.04 restricts them through AppArmor); the job fails if the sandbox
-  cannot start, so in CI the sandbox tests run and are not skipped.
+  cannot start, so in CI no test is skipped for lack of the sandbox (the CeNTREX and diatomic-py port tests are
+  skipped because those packages are not installed there).
 - Multiport: the nesting of `[` and `{` in a port's output is limited to 32 levels, counted in one linear pass
   before the JSON parser (`USCITA_MAX_PROFONDITA`). Before, the limit was the parser's RecursionError, which on
   Python 3.14 depends on the stack size: measured on 2026-11-11 with CPython 3.14.8, 10 000 levels accepted with an

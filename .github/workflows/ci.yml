@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
-      - name: Install bubblewrap and allow unprivileged user namespaces (Ubuntu 24.04 restricts them through AppArmor); the job fails if the sandbox cannot start, so the sandbox tests run here and are never skipped
+      - name: Install bubblewrap and allow unprivileged user namespaces (Ubuntu 24.04 restricts them through AppArmor); the job fails if the sandbox cannot start, so no test is skipped here for lack of the sandbox
         run: |
           sudo apt-get -o Acquire::Retries=5 update
           sudo apt-get -o Acquire::Retries=5 install -y bubblewrap
