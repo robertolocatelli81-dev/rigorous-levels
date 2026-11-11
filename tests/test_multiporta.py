@@ -530,5 +530,70 @@ class TestPrefissoInterprete(unittest.TestCase):
                 os.environ["HOME"] = vecchio
 
 
+class TestProfonditaUscita(unittest.TestCase):
+    """CI 11/11/2026: su CPython 3.14.10 json.loads accettava un oggetto annidato 100 000 volte (nessun RecursionError):
+    il limite di annidamento è ora contato prima del parser, uguale su ogni versione di Python."""
+
+    def _scrivi_e_leggi(self, testo):
+        d = tempfile.mkdtemp(prefix="qraft_prof_")
+        try:
+            p = os.path.join(d, "u.json")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(testo)
+            return MP.leggi_uscita(p)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_limite_esatto(self):
+        L = MP.USCITA_MAX_PROFONDITA
+        for apri, chiudi in (("[", "]"), ('{"a":', "}")):
+            doc, motivo = self._scrivi_e_leggi(apri * L + "1" + chiudi * L)
+            self.assertIsNotNone(doc, motivo)                                   # controllo positivo: L livelli passano
+            doc, motivo = self._scrivi_e_leggi(apri * (L + 1) + "1" + chiudi * (L + 1))
+            self.assertIsNone(doc)
+            self.assertIn("annidata", motivo)
+            for n in (1000, 100000, 400000):                                    # i casi della CI, su ogni Python
+                self.assertIsNone(self._scrivi_e_leggi(apri * n + "1" + chiudi * n)[0])
+
+    def test_parentesi_nelle_stringhe_non_contano(self):
+        L = MP.USCITA_MAX_PROFONDITA
+        s = json.dumps({"motivo": "[" * 1000 + '\\" {{{ \\\\', "x": ["]]]" * 50, "\"[\""]})
+        self.assertEqual(MP._profondita_json(s, L), 2)
+        self.assertIsNotNone(self._scrivi_e_leggi(s)[0])
+
+    def test_differenziale_con_profondita_vera(self):
+        import random
+        rnd = random.Random(20261111)
+
+        def gen(d):
+            if d == 0 or rnd.random() < 0.3:
+                return rnd.choice([1, "a[{\\\"", None, 2.5, "}]"])
+            if rnd.random() < 0.5:
+                return [gen(d - 1) for _ in range(rnd.randint(0, 3))]
+            return {f"k{i}[": gen(d - 1) for i in range(rnd.randint(0, 3))}
+
+        def vera(o):
+            if isinstance(o, list):
+                return 1 + max((vera(x) for x in o), default=0)
+            if isinstance(o, dict):
+                return 1 + max((vera(x) for x in o.values()), default=0)
+            return 0
+        for _ in range(500):
+            o = gen(rnd.randint(0, 45))
+            s = json.dumps(o, indent=rnd.choice([None, 1]), ensure_ascii=rnd.random() < 0.5)
+            self.assertEqual(min(MP._profondita_json(s, 10 ** 9), 10 ** 9), vera(o))
+            doc, motivo = self._scrivi_e_leggi(s)
+            self.assertEqual(bool(motivo), vera(o) > MP.USCITA_MAX_PROFONDITA, motivo)   # null è un doc valido: conta il motivo
+
+    def test_caso_peggiore_lineare(self):
+        import time
+        n = MP.USCITA_MAX_BYTE
+        for testo in ('"\\' * (n // 2), '"' * n, "[" * n, "a" * n):
+            t0 = time.perf_counter()
+            doc, motivo = self._scrivi_e_leggi(testo[:n])
+            self.assertIsNone(doc)
+            self.assertLess(time.perf_counter() - t0, 5.0, testo[:4])
+
+
 if __name__ == "__main__":
     unittest.main()

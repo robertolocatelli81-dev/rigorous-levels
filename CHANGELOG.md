@@ -61,6 +61,10 @@ Changed:
 - CI: Python 3.10–3.14 (python-flint 0.9.0 wheels exist for 3.10–3.14); bubblewrap installed on the runner and
   unprivileged user namespaces allowed (Ubuntu 24.04 restricts them through AppArmor); the job fails if the sandbox
   cannot start, so in CI the sandbox tests run and are not skipped.
+- Multiport: the nesting of `[` and `{` in a port's output is limited to 32 levels, counted in one linear pass
+  before the JSON parser (`USCITA_MAX_PROFONDITA`). Before, the limit was the parser's RecursionError, which on
+  Python 3.14 depends on the stack size: measured on 2026-11-11 with CPython 3.14.8, 10 000 levels accepted with an
+  8 MiB stack, 100 000 levels accepted with 64 MiB or unlimited; the first CI run on 3.14.10 accepted 100 000.
 - Tests: `test_scqubits_adattatore` and `test_porta_centrex_tlf` decide whether the sandbox is usable with the same probe
   as `test_multiporta` (bwrap started with `--unshare-all`), not with the presence of `bwrap` on PATH: on a runner where
   `bwrap` exists but cannot create namespaces the sandbox test raised an error instead of being skipped.

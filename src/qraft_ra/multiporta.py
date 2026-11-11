@@ -37,6 +37,7 @@ CONTRATTO = "qraft-porta/0.1"
 UNITA = {"GHz": Fraction(10 ** 9), "MHz": Fraction(10 ** 6), "Hz": Fraction(1)}
 SECONDI_MAX, MEM_MIB_MAX, LIVELLI_MAX = 3600, 65536, 10000       # tetti dichiarati (NEMESIS 11/11: secondi 2**31 → OverflowError)
 USCITA_MAX_BYTE = 1 << 20                                         # l'uscita è letta al più per 1 MiB
+USCITA_MAX_PROFONDITA = 32                                         # annidamento massimo di [ e { nell'uscita
 TMPFS_BYTE = 256 << 20                                            # /tmp, /home, /dev/shm della sandbox: tetto di RAM
 JMAX_TLF = 20                                                     # tlf_centrex: J ≤ 20 = 1764 stati, 0,4 s, 47 MiB (NEMESIS B 11/11)
 PORTE = ("numpy_rotore", "prova_sbagliata", "scqubits_transmon", "diatomic_py", "prova_rete", "prova_scrittura",
@@ -225,9 +226,37 @@ def _no_costante(nome):
     raise ValueError(f"costante non JSON {nome}")
 
 
+def _profondita_json(testo: str, limite: int) -> int:
+    """Massimo annidamento di [ e { fuori dalle stringhe JSON, in una passata lineare senza ricorsione né regex; si ferma
+    appena supera `limite`. Un testo malformato dà un numero qualsiasi: poi lo rifiuta il parser."""
+    p = m = 0
+    in_stringa = escape = False
+    for ch in testo:
+        if in_stringa:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_stringa = False
+        elif ch == '"':
+            in_stringa = True
+        elif ch == "[" or ch == "{":
+            p += 1
+            if p > m:
+                m = p
+                if m > limite:
+                    return m
+        elif ch == "]" or ch == "}":
+            p -= 1
+    return m
+
+
 def leggi_uscita(percorso: str) -> Tuple[Optional[object], str]:
     """Legge uscita.json come file REGOLARE (O_NOFOLLOW), al più USCITA_MAX_BYTE, JSON stretto: niente NaN/Infinity,
-    niente chiavi duplicate, profondità limitata dal parser (RecursionError = rifiuto). (doc, "") oppure (None, motivo)."""
+    niente chiavi duplicate, annidamento al più USCITA_MAX_PROFONDITA livelli, contato PRIMA del parser (il limite di
+    ricorsione del parser cambia fra versioni di Python: su CPython 3.14.10 un oggetto annidato 100 000 volte passava).
+    (doc, "") oppure (None, motivo)."""
     try:
         fd = os.open(percorso, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     except OSError as e:
@@ -245,7 +274,10 @@ def leggi_uscita(percorso: str) -> Tuple[Optional[object], str]:
     if len(dati) > USCITA_MAX_BYTE:
         return None, f"uscita oltre {USCITA_MAX_BYTE} byte"
     try:
-        return json.loads(dati.decode("utf-8"), object_pairs_hook=_no_dup, parse_constant=_no_costante), ""
+        testo = dati.decode("utf-8")
+        if _profondita_json(testo, USCITA_MAX_PROFONDITA) > USCITA_MAX_PROFONDITA:
+            return None, f"uscita annidata oltre {USCITA_MAX_PROFONDITA} livelli"
+        return json.loads(testo, object_pairs_hook=_no_dup, parse_constant=_no_costante), ""
     except (ValueError, RecursionError) as e:
         return None, f"uscita non JSON: {type(e).__name__}: {str(e)[:200]}"
 
