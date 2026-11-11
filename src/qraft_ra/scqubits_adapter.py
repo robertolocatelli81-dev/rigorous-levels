@@ -232,7 +232,8 @@ class ScqubitsCheck:
     cutoff: int
 
 
-def guaranteed_from_scqubits(qubit, k: int = 6, width: float = 1e-10, *, deadline: Optional[float] = None) -> ScqubitsCheck:
+def guaranteed_from_scqubits(qubit, k: int = 6, width: float = 1e-10, *, tolerance: Optional[float] = None,
+                             deadline: Optional[float] = None) -> ScqubitsCheck:
     """One line from an object the user already has: `scqubits.Transmon(EJ, EC, ng, ncut)` or
     `scqubits.Fluxonium(EJ, EC, EL, flux, cutoff)` → guaranteed intervals of ITS H (same convention: GHz, h = 1) and
     the verdict of its own `eigenvals()` against them, with the float tolerance 32·eps·‖H‖ declared. Anything else
@@ -254,9 +255,31 @@ def guaranteed_from_scqubits(qubit, k: int = 6, width: float = 1e-10, *, deadlin
         tol = FLOOR_FACTOR * EPS * (math.sqrt(8 * el * ec) * (cut + 0.5) + ej)        # Gershgorin: ω(N+½) + E_J
     else:
         raise InputRejected(f"expected a scqubits Transmon or Fluxonium, got {name}")
+    if tolerance is not None:
+        tol = _finite_real(tolerance, "tolerance")
+        if tol < 0:
+            raise InputRejected("tolerance must be >= 0")
     levels = tuple(float(x) for x in qubit.eigenvals(evals_count=k))
     out = MP.Output("numpy_rotor", f"scqubits {name} cutoff {cut}", levels, "GHz", "OK", "", 0.0, "process")
     return ScqubitsCheck(name, iv, levels, MP.compare(iv, "GHz", out, tolerance=tol), tol, cut)
+
+
+check = guaranteed_from_scqubits
+
+
+def assert_inside(levels, intervals, tolerance: float = 0.0, unit: str = "GHz") -> None:
+    """Assertion helper for other people's regression tests: `levels` (any float sequence, in `unit`) must fall
+    inside the guaranteed `intervals` (within `tolerance`, same unit as the intervals: GHz); otherwise AssertionError
+    with the per-level verdict. Fewer or more levels than intervals is an error too (never a partial pass)."""
+    from qraft_ra import multiport as MP
+    try:
+        lev = tuple(float(x) for x in levels)
+    except (TypeError, ValueError):
+        raise AssertionError(f"levels: expected a sequence of numbers, got {type(levels).__name__}") from None
+    out = MP.Output("numpy_rotor", "levels", lev, unit, "OK", "", 0.0, "caller")
+    v = MP.compare(intervals, "GHz", out, tolerance=tolerance)
+    if v.overall not in ("INSIDE", "INSIDE_TOLERANCE"):
+        raise AssertionError(f"{v.overall}: {v.reason}; per level {v.per_level}")
 
 
 def compare(r: Rotor, k: int = 6, *, tol_ours: float = 1e-11, tol_scq: float = 1e-10) -> Dict:

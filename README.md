@@ -1,13 +1,50 @@
 # qraft-ra
 
-Mathematically guaranteed eigenvalue intervals for the charge-basis rotor (transmon, cos 2φ, any sum of cosines up to
-cos 24φ), for the spherical rotor in a field, for the ¹Σ molecule with hyperfine, Zeeman and Stark terms, for the
-Mathieu characteristic values a_r(q), b_r(q) and for the fluxonium in the oscillator basis; a convergence warning for
-scqubits with a declared threshold rule; a sandboxed multiport that runs other people's solvers inside one of six
-isolation engines (Linux, macOS, Windows, WebAssembly) and tells, level by level, whether they fall inside the
-intervals; and the guaranteed per-level error of the Duffing model against the transmon.
+Mathematically guaranteed eigenvalue intervals, truncation included: for j < k, **λ_j(H_N′) ≤ λ_j(H) ≤ λ_j(H_N)**
+(Rayleigh–Ritz above, a proven lower bound of the truncated block below, eigenvalue counts in Arb ball arithmetic;
+`docs/PROOF.md`), for the charge-basis rotor (transmon, cos 2φ, any sum of cosines up to cos 24φ), the spherical rotor
+in a field, the ¹Σ molecule with hyperfine, Zeeman and Stark terms, the Mathieu characteristic values a_r(q), b_r(q),
+the fluxonium in the oscillator basis, parameters given as intervals, and matrix elements between eigenvectors; a
+convergence warning for scqubits with a declared threshold rule, a one-line check of a scqubits object, a sandboxed
+multiport that runs other people's solvers inside one of six isolation engines (Linux, macOS, Windows, WebAssembly)
+and tells, level by level, whether they fall inside the intervals, and the guaranteed per-level error of the Duffing
+model against the transmon. The numbers below are re-measured by `python -m qraft_ra.reproduce` and by the scripts in
+`bench/`, each row of the tables naming its script.
 
 Noûs, AI agent under a revocable mandate from Roberto Locatelli.
+
+## Three public reports, reproducible with this package
+
+Each one was found by comparing a public solver with the guaranteed intervals and reported by the author on
+2026-11-11 (links are public; nothing else was sent):
+
+1. **durham-qlm/diatomic-py #15** — https://github.com/durham-qlm/diatomic-py/issues/15. The code of
+   `tensor_nuclear` (2.1.0) uses +√6 c₃ T²(C)·T²(I₁,I₂); the package's paper (eq. 5b), Aldegunde et al. 2008 and
+   Gregory et al. 2016 use the opposite sign. With the paper's sign the 16 RbCs transitions of Gregory et al. 2016
+   (Table I) are reproduced within 100 Hz of their model values f_the (intervals 7 mHz wide); with the code's sign 1 of
+   16. In this package `bench/gregory2016.py` re-computes the 16 lines (re-measured here on 2026-11-11: 16 of 16
+   centres within 100 Hz of their f_the, largest 93.8 Hz, every interval ≤ 7.4 mHz wide, 1.6 s), `tests/test_hyperfine_molecule.py::TestGregory2016`
+   checks the stretched line M_F = +5 → +6 at 181.541 G, and `TestCostruzioneContraDiatomicPy` compares the matrix
+   elements (needs `pip install diatomic-py==2.1.0`).
+2. **qiskit-community/qiskit-metal #1252** — https://github.com/qiskit-community/qiskit-metal/issues/1252.
+   `mathieu_level(m, ng, Ej, Ec)` returns the energy of another level for some (m, Ej/Ec) at n_g = 0 and 1/2: the
+   cause is `scipy.special.mathieu_a/mathieu_b` (fixed on scipy main by PR #25128, milestone 2.0.0). Two counts,
+   two referents: (a) scipy releases, re-measured on this tree with `bench/mathieu_vs_scipy.py` (r ≤ 12,
+   |q| ≤ 400, step 0.5): 52 wrong values of 40 025 in 1.17.1 and 1.18.1 (identical lists), 0 in
+   2.0.0.dev0+git20261108; on the fine grid of the issue (step 0.05, `bench/mathieu_vs_scipy.py intervals OUT 0.05`,
+   re-measured here on 2026-11-11): 400 025 values, 399 951 GUARANTEED and 74 WIDE, 522 wrong in 1.17.1 and in
+   1.18.1 (identical lists, 326 of them equal to another order ≤ 12), 0 in 2.0.0.dev0+git20261108, 0.50 ms median per
+   value; (b) qiskit-metal's `mathieu_level`,
+   which inherits (a): the numbers in the issue are theirs to reproduce with the port `metal_mathieu`. Since 0.3.0
+   `qraft_ra.mathieu` gives the guaranteed values directly.
+3. **scqubits/scqubits #334** (comment) — https://github.com/scqubits/scqubits/issues/334#issuecomment-6796563509.
+   The first scipy release whose sparse `eigsh` silently omits the zero eigenvalue is 1.15.0 (bisection 1.10.1,
+   1.13.1, 1.14.1 right; 1.15.0, 1.15.3, 1.16.2, 1.17.1, 1.18.1 wrong; independent of the start vector).
+
+Two more measurements with no report (the other side already documents or fixed them): CeNTREX-TlF's default
+`Jmax = J + 2` errs by 4.26 MHz at 10 kV/cm with no warning; at 30 kV/cm their API is 3.9 GHz off but warns
+("Ambiguous eigenstate assignment"); their AGENTS.md already tells users to raise Jmax. SQcircuit 1.0.0's single
+transmon is inside the intervals within 3e-13 GHz once the junction's own capacitance (1e-20 F) is included.
 
 ## The problem, and for whom
 
@@ -130,9 +167,14 @@ iv = guaranteed_levels_over_box(RotorBall.transmon((0.297, 0.303), (14.85, 15.15
 print(iv.state, iv.alpha)                                                # GUARANTEED, rho = 0.15 GHz
 
 # Mathieu characteristic values, any real q (negative and large included), guaranteed order
-from qraft_ra.mathieu import mathieu_a, mathieu_b
+from qraft_ra import mathieu_a, mathieu_b
 v = mathieu_a(11, 299.0)                         # scipy 1.18.1 returns 232.195 here; the interval is [123.9949…]
-print(v.state, v.strings, v.K)
+print(v.state, v.strings, v.K)                   # a_0(1) = -0.45513860 (A&S Table 20.1) is inside its interval
+
+# matrix elements between eigenvectors: |<0|n|1>| = 1.08780085731 with a width of 1.7e-14
+from qraft_ra import guaranteed_matrix_element
+e = guaranteed_matrix_element(Rotor.transmon(0.3, 15.0, n_g=0.25), 0, 1, "n")
+print(e.low, e.high, e.max_width)
 
 # fluxonium at half flux, parameters of Zhang et al. 2021 (PRX 11, 011010)
 from qraft_ra.fluxonium import Fluxonium, guaranteed_fluxonium_levels
@@ -155,9 +197,10 @@ iv6 = guaranteed_molecule_levels(m, 12, 1, width=1e-11)       # 2M_F = 12
 # multiport: scqubits in the strongest isolation engine available, compared with the intervals
 from qraft_ra import multiport as MP
 r = MP.Request("scqubits_transmon", {"type": "cos_rotor", "E_C": 0.3, "E_J": 15.0, "n_g": 0.25}, 6,
-               {"ncut": 30}, site_packages=(<site-packages with scqubits>,))
+               {"ncut": 30}, site_packages=MP.site_packages_of("scqubits"))
 u = MP.run_port(r, engine="auto")                # SandboxMissing if no engine isolates; u.sandbox names the engine
 print(MP.compare(iv, "GHz", u, tolerance=1e-12).overall)      # INSIDE / INSIDE_TOLERANCE / OUTSIDE
+outs = MP.run_ports([r] * 100)                   # a batch: one sandbox process, 0.012 s per case (measured)
 
 # Duffing against transmon
 from qraft_ra.duffing_vs_transmon import duffing_error
@@ -171,55 +214,29 @@ Every row is a measurement of 2026-11-10/11 on this tree (details and dates in "
 
 | quantity | this package | other tool | guarantee | correct against a known truth | time per point, ours / theirs (`bench/compare_tools.py`, 2026-11-11, Python 3.11.2) | fails when | script of the other columns |
 |---|---|---|---|---|---|---|---|
-| transmon levels (cos mφ, any n_g), 6 levels | `guaranteed_levels` | scqubits `Transmon` (ncut 30), qiskit-metal `Hcpb`, SQcircuit, pyEPR | yes (width ≤ 1.6e-13 GHz on 400 cases) / no | 50-digit mpmath inside in 2400 of 2400 levels; scqubits at ncut 30 wrong without a warning in 65 of 200 cases at E_J/E_C ≥ 7744, all flagged by the adapter | 92 ms / 0.27 ms (**scqubits 340× faster**; our float solver 2.4 ms) | E_J/E_C beyond ~1e6 (N > 4000: `OutOfDomain`) | `bench/readme_numbers.py` |
+| transmon levels (cos mφ, any n_g), 6 levels | `guaranteed_levels` | scqubits `Transmon` (ncut 30), qiskit-metal `Hcpb`, SQcircuit, pyEPR | yes (width ≤ 1.6e-13 GHz on 400 cases) / no | 50-digit mpmath inside in 2400 of 2400 levels; scqubits at ncut 30 wrong without a warning in 70 of 200 wide-range cases (error > 1e-6 GHz; 65 with the relative criterion of `bench/readme_numbers.py`), all flagged by the adapter, 0 false alarms | 92 ms / 0.27 ms (**scqubits 340× faster**; our float solver 2.4 ms) | E_J/E_C beyond ~1e6 (N > 4000: `OutOfDomain`) | `bench/readme_numbers.py` |
 | transmon with E_C, E_J (and n_g) as intervals | `guaranteed_levels_over_box` | none gives a bound over a box | yes (point computations at the box corners and band edges + ρ) / — | 200 transmons × 5 inner points: 0 point intervals outside the box interval; a point 3 % outside the box detected in 187 of 200; box width 2.1× the observed spread (median; max 5.5×); n_g intervals checked against a fine sampling at E_J/E_C = 5 (tests) | 176 ms / — | an n_g interval longer than 1 is the whole band | `bench/parameter_balls.py` |
 | matrix elements ⟨i|n|j⟩, ⟨i|cos φ|j⟩ | `guaranteed_matrix_element` | scqubits `matrixelement_table` (ncut 40) | yes (width median 2.7e-14, max 3.1e-12 on 1000 elements) / no | scqubits inside in 1000 of 1000 (200 transmons × 5 elements); exact symmetry values inside (tests) | 58 ms / ms | levels not separated at the width (no bound, `OutOfDomain`) | `bench/matrix_elements.py` |
 | Mathieu a_r(q), b_r(q) | `mathieu_a/b` | scipy `mathieu_a/b` 1.17.1, 1.18.1 | yes (1e-12 relative, 40 019 of 40 025; 6 WIDE) / no | 52 scipy values of 40 025 wrong (another order), 0 in scipy 2.0.0.dev; all 52 confirmed by an independent reference | 0.33 ms / 2.3 µs (**scipy 150× faster**) | r > 200, non-finite q (refused) | `bench/mathieu_vs_scipy.py` |
 | fluxonium levels | `guaranteed_fluxonium_levels` | scqubits `Fluxonium` (cutoff 110) | yes (5e-10 GHz) / no (cutoff chosen by the user) | scqubits cutoff 110 inside in 16 of 16 levels of 4 published devices; cutoff 6 outside | 0.39 s (light device) to 6.5 s / 10 ms (**scqubits 37× faster**) | N > 240 Fock states needed (`OutOfDomain`) | `bench/fluxonium_devices.py` |
-| spherical rotor in a field | `guaranteed_sphere_levels` | numpy at a larger cut | yes / no | 177 of 177 cuts inside (author's repository, 2026-11-10); Blackmore et al. 2018: 130.3 Hz guaranteed vs 129 Hz | 0.36 ms / 0.10 ms (numpy 3.5× faster) | D_c with fewer than k levels in the model (refused) | `tests/test_spherical_rotor.py` |
-| ¹Σ molecule, hyperfine + Zeeman + Stark | `guaranteed_molecule_levels` | diatomic-py 2.1.0, CeNTREX-TlF 0.4.0 | yes (7 mHz on RbCs) / no (`Nmax`, `Jmax` by hand) | Gregory et al. 2016: 16 of 16 transitions within 100 Hz of their model (author's repository, 2026-11-10); diatomic-py's code has the wrong sign of c₃ (issue #15); CeNTREX default `Jmax = J+2` errs 4.26 MHz at 10 kV/cm | 37 ms (L = 3, 1 level) to seconds per sector / ms | L > 64, 2I > 40 (refused); fields not along z (not modelled) | `tests/test_hyperfine_molecule.py` |
-| convergence warning for scqubits | `scqubits_spectrum`, `guaranteed_from_scqubits` | scqubits alone | no (empirical, declared rule) / none; the second gives the guaranteed verdict | 0 results `OK` outside the threshold in 4280 runs | 2 scqubits calls / 1 | the border ±1e-4 of the threshold | `tests/test_scqubits_adapter.py`, `tests/test_parameter_balls.py` |
-| running other people's solvers | multiport, 6 engines | — | fail-closed isolation, closed contract | S1–S7 controls pass for bwrap, podman and wasm (measured here); docker, sandbox-exec, appcontainer: CI only | seconds per run / — | an engine whose probe fails (`SandboxMissing`, no fallback) | `tests/test_multiport.py` |
+| spherical rotor in a field | `guaranteed_sphere_levels` | numpy at a larger cut | yes / no | 60 random (B, dE, M): numpy at a cut 40 larger inside in 240 of 240 levels; Blackmore et al. 2018: 130.3 Hz guaranteed vs 129 Hz | 0.36 ms / 0.10 ms (numpy 3.5× faster) | D_c with fewer than k levels in the model (refused) | `bench/duffing_adapter_sphere.py`, `tests/test_spherical_rotor.py` |
+| ¹Σ molecule, hyperfine + Zeeman + Stark | `guaranteed_molecule_levels` | diatomic-py 2.1.0, CeNTREX-TlF 0.4.0 | yes (7 mHz on RbCs) / no (`Nmax`, `Jmax` by hand) | Gregory et al. 2016: 16 of 16 transitions within 100 Hz of their model (`bench/gregory2016.py`); diatomic-py's code has the wrong sign of c₃ (issue #15); CeNTREX default `Jmax = J+2` errs 4.26 MHz at 10 kV/cm (measured 2026-11-11 in the author's repository with their package; the port `centrex_tlf` reproduces their levels here) | 37 ms (L = 3, 1 level) to seconds per sector / ms | L > 64, 2I > 40 (refused); fields not along z (not modelled) | `bench/gregory2016.py`, `tests/test_hyperfine_molecule.py`, `tests/test_port_centrex_tlf.py` |
+| convergence warning for scqubits; `check(scqubits_obj)` | `scqubits_spectrum`, `check` (= `guaranteed_from_scqubits`) | scqubits alone | no (empirical, declared rule) / none; `check` gives the guaranteed verdict | rule: 0 results `OK` outside the threshold in 4280 runs; `check` at ncut 30 on the 200 wide-range transmons: 70 OUTSIDE beyond 1e-6 GHz = exactly the 70 the rule flags (0 flagged by one and not the other), 76 outside the float floor; device regime 0 of 200 | 2 scqubits calls / 1 (0.06–0.10 s) | the border ±1e-4 of the threshold | `bench/check_200.py`, `tests/test_parameter_balls.py` |
+| running other people's solvers | multiport, 6 engines, batches | — | fail-closed isolation, closed contract | S1–S7 controls pass for bwrap, podman and wasm (measured here); docker, sandbox-exec, appcontainer: CI only | 1.0–1.1 s per single run; 0.012–0.023 s per case in a batch of 100 (podman; `bench/multiport_batch.py`) | an engine whose probe fails (`SandboxMissing`, no fallback) | `tests/test_multiport.py`, `bench/multiport_batch.py` |
 
 Where the other tool is better it is written: scipy and scqubits are 37–340× faster on these inputs; they give no
 bound. The timings are medians of 5 runs on the author's machine (`bench/compare_tools.py` prints the platform).
-
-## Three public reports, reproducible with this package
-
-Each one was found by comparing a public solver with the guaranteed intervals and reported by the author on
-2026-11-11 (links are public; nothing else was sent):
-
-1. **durham-qlm/diatomic-py #15** — https://github.com/durham-qlm/diatomic-py/issues/15. The code of
-   `tensor_nuclear` (2.1.0) uses +√6 c₃ T²(C)·T²(I₁,I₂); the package's paper (eq. 5b), Aldegunde et al. 2008 and
-   Gregory et al. 2016 use the opposite sign. With the paper's sign the 16 RbCs transitions of Gregory et al. 2016
-   (Table I) are reproduced within 100 Hz of their model values f_the (intervals 7 mHz wide); with the code's sign 1 of
-   16. In this package `tests/test_hyperfine_molecule.py::TestGregory2016` checks the stretched line M_F = +5 → +6 at
-   181.541 G, and `TestCostruzioneContraDiatomicPy` compares the matrix elements (needs `pip install diatomic-py==2.1.0`).
-2. **qiskit-community/qiskit-metal #1252** — https://github.com/qiskit-community/qiskit-metal/issues/1252.
-   `mathieu_level(m, ng, Ej, Ec)` returns the energy of another level for some (m, Ej/Ec) at n_g = 0 and 1/2: the
-   cause is `scipy.special.mathieu_a/mathieu_b` (fixed on scipy main by PR #25128, milestone 2.0.0). Two counts,
-   two referents: (a) scipy releases, re-measured on this tree with `bench/mathieu_vs_scipy.py` (r ≤ 12,
-   |q| ≤ 400, step 0.5): 52 wrong values of 40 025 in 1.17.1 and 1.18.1 (identical lists), 0 in
-   2.0.0.dev0+git20261108; the finer grid of the issue (step 0.05, 400 000 values, 522 wrong, scipy 1.10.1 … 1.18.1)
-   was measured on 2026-11-11 in the author's repository and is not re-run here; (b) qiskit-metal's `mathieu_level`,
-   which inherits (a): the numbers in the issue are theirs to reproduce with the port `metal_mathieu`. Since 0.3.0
-   `qraft_ra.mathieu` gives the guaranteed values directly.
-3. **scqubits/scqubits #334** (comment) — https://github.com/scqubits/scqubits/issues/334#issuecomment-6796563509.
-   The first scipy release whose sparse `eigsh` silently omits the zero eigenvalue is 1.15.0 (bisection 1.10.1,
-   1.13.1, 1.14.1 right; 1.15.0, 1.15.3, 1.16.2, 1.17.1, 1.18.1 wrong; independent of the start vector).
-
-Two more measurements with no report (the other side already documents or fixed them): CeNTREX-TlF's default
-`Jmax = J + 2` errs by 4.26 MHz at 10 kV/cm with no warning; at 30 kV/cm their API is 3.9 GHz off but warns
-("Ambiguous eigenstate assignment"); their AGENTS.md already tells users to raise Jmax. SQcircuit 1.0.0's single
-transmon is inside the intervals within 3e-13 GHz once the junction's own capacitance (1e-20 F) is included.
 
 ## Measurements
 
 **Measured on 2026-11-10** (charge-basis rotor, `bench/readme_numbers.py --full`, Python 3.11.2, numpy 2.4.6, scipy
 1.17.1, python-flint 0.9.0, scqubits 4.3.1): 400 of 400 cases `GUARANTEED`, the 50-digit mpmath reference inside the
 interval in 2400 of 2400 levels, largest width 1.56e-13 GHz; time per guaranteed point (6 levels) mean 0.51 s,
-median 0.16 s; scqubits at ncut = 30 wrong without a warning in 65 of 200 cases at E_J/E_C ≥ 7744, all 65 flagged by
-the adapter, 0 false alarms.
+median 0.16 s; scqubits at ncut = 30 wrong without a warning in 65 of 200 cases at E_J/E_C ≥ 7744 with the criterion of that
+bench (error > 1e-6 × max(1, largest transition)), all 65 flagged by the adapter, 0 false alarms. Re-measured on
+2026-11-11 with the absolute criterion (error > 1e-6 GHz, `bench/check_200.py`, `python -m qraft_ra.reproduce --full`):
+wrong in 70 of 200 at E_J/E_C ≥ 5542, all 70 flagged, 0 false alarms, 0 missed; with the float floor as criterion
+(32·eps·‖H‖) 76 of 200 are outside the intervals; in the device regime (E_J/E_C ≤ 1000) 0 of 200 at either criterion.
 
 **Measured on 2026-11-11 on this tree** (`bench/mathieu_vs_scipy.py`, `bench/fluxonium_devices.py`, Python 3.11.2
 unless stated):
@@ -235,29 +252,45 @@ unless stated):
 | parameters as intervals, 200 transmons of the device regime, E_C and E_J ± 1 %, 6 levels, 5 inner points each (`bench/parameter_balls.py`) | 200 of 200 box intervals `GUARANTEED`; 0 of 1000 inner point intervals outside the box interval; a point with E_J 3 % above the box falls outside in 187 of 200 cases; box width / observed spread of the inner points: median 2.1, max 5.5; 0.11 s median per box |
 | generative input tests (seeded, every public entry point) | found and fixed before this commit: OverflowError on integers beyond float64 in 4 entry points, `nmax_limit` not validated, uncapped `M`, `L_limit`, `N_limit`, `**kw` in `mathieu_a/b` |
 
-**Measured on 2026-11-10/11** in the author's repository with the modules of 0.2.0 (logs there, not re-run here):
-6 real transmons of arXiv:2407.17407: 26 of 26 `GUARANTEED`, width ≤ 1.1e-13 GHz; RbCs sphere 130.3 Hz guaranteed
-for M = ±1 at 1.2 V/cm (Blackmore et al. 2018: 129 Hz); RbCs molecule 16 of 16 transitions of Gregory et al. 2016
-within 100 Hz (max 94 Hz), intervals 7 mHz wide; TlF within 0.5 Hz of CeNTREX-TlF 0.4.0 at zero field and 173 V/cm;
-adapter rule: 0 results `OK` outside the threshold, verdicts identical in GHz/MHz/Hz; Duffing |δ_3| ≥ 1 MHz in 200 of
-200 transmons (median 34 MHz).
+**Re-measured on 2026-11-11 on this tree** (the same cases as in the author's repository on 2026-11-10/11, now as
+scripts in `bench/`):
 
-Mutation testing: 0.2.0 modules in the author's repository (rotor 8 of 8; sphere 16 of 16 + 14 of 14; molecule 24 of
-24 + 21 of 21; adapter 18 of 18; multiport 23 of 24 + 1 equivalent; Duffing 22 of 24 + 2 equivalent). 0.3.0 modules:
-see `CHANGELOG.md` (hand mutants on the new lines of mathieu, fluxonium, isolation and the input guards, run on a
-green copy of this tree).
+| What | Script | Result |
+|---|---|---|
+| 6 real transmons of arXiv:2407.17407 (their E_J, E_C; Q5 also with their fits up to cos 8φ; 4–12 levels each) | `bench/real_transmons.py` | 84 of 84 levels `GUARANTEED`, width ≤ 1.14e-13 GHz; the smallest fixed charge cut within 1 kHz of the intervals is 10 (Q0), 12 (Q1, Q2), 15 (Q3, Q4), 20 (Q5 and its harmonic fits); 5.6 s |
+| Spherical rotor, 60 random (B, dE, M), 4 levels | `bench/duffing_adapter_sphere.py` | numpy at a cut 40 larger inside in 240 of 240 levels |
+| Molecule, RbCs, 16 transitions of Gregory et al. 2016 with their constants | `bench/gregory2016.py` | 16 of 16 centres within 100 Hz of their model (largest 93.8 Hz), every interval ≤ 7.4 mHz wide, 1.6 s |
+| Molecule, TlF, CeNTREX-TlF 0.4.0 | `tests/test_port_centrex_tlf.py` (needs `QRAFT_BERSAGLI_VENV`) | 4 tests OK on 2026-11-11: their levels inside the intervals at zero field and at 173 V/cm with c₃_ours = 5·c₃_theirs (an operator identity); their Zeeman convention μ_J/J not covered for J ≥ 2 |
+| Adapter rule "scq-threshold/1.0", 200 transmons of the device regime × ncut 3…30 (5600 runs) | `bench/duffing_adapter_sphere.py` | 0 results `OK` whose true error (against the guaranteed intervals) exceeds their own threshold; the same H written in MHz and Hz with the unit declared: 0 of 1200 verdicts differ |
+| Multiport sandbox, positive controls S1–S7 | `tests/test_multiport.py` | per engine: network reached outside / blocked inside; file written outside / blocked inside; loop → timeout; 3 GiB → MemoryError; unknown key → `INVALID`; engine missing or not isolating → `SandboxMissing` |
+| Duffing against transmon, 200 transmons of the device regime, variant "spectrum", level 3 | `bench/duffing_adapter_sphere.py` | \|δ_3\| ≥ 1 MHz in 200 of 200 (the end of the guaranteed interval of δ_3 nearer to zero; median 78 MHz, 90th percentile 4.3 GHz) |
+| Origin case H = h2·n² + c2·cos 4φ with the fixed cut Nb = 40 of the author's earlier work | `tests/test_cos4phi_origin.py` | inside for (h2, c2) = (1, 2), (0.5, 20), (2, −15); off by 1.4e-11 for (0.25, 60), where the first cut inside lies between 41 and 60; Nb = 2 outside for all |
 
-## Tests
+Mutation testing (not a claim about the package's numbers: a measure of the tests): 0.3.0 lines, 22 hand mutants on a
+green copy of this tree on 2026-11-11, 20 killed, 2 declared equivalent (`CHANGELOG.md`); 0.2.0 modules, in the
+author's repository on 2026-11-10/11 (rotor 8 of 8; sphere 16 of 16 + 14 of 14; molecule 24 of 24 + 21 of 21; adapter
+18 of 18; multiport 23 of 24 + 1 equivalent; Duffing 22 of 24 + 2 equivalent).
 
-`cd tests && python -B -m unittest test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter
-test_readme_example test_spherical_rotor test_hyperfine_molecule test_inputs_review test_duffing_vs_transmon
-test_multiport test_port_centrex_tlf test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_examples test_generative_inputs
-test_deprecated_aliases`,
-against the installed package. The sandbox tests run once per isolation engine whose probe passes
-(`TestSandbox_<engine>`), and are skipped with the probe's reason otherwise. `test_port_centrex_tlf` runs only with
-`QRAFT_BERSAGLI_VENV` pointing at a venv with centrex-tlf. `bench/matrix.sh VENV...` reproduces the CI matrix locally
-(stack default / unlimited / 1 MiB, engines present, bwrap absent, bwrap failing; fresh HOME per run).
-`tests/test_examples.py` runs every script of `examples/` in a fresh interpreter and checks what it prints.
+## Tests, reproduction, determinism
+
+`python -m unittest discover -s tests` against the installed package (`pip install .`; the test files import the
+package, not the source tree). The sandbox tests run once per isolation engine whose probe passes
+(`TestSandbox_<engine>`) and are skipped with the probe's reason otherwise; `test_port_centrex_tlf` runs only with
+`QRAFT_BERSAGLI_VENV` pointing at a venv with centrex-tlf; `tests/test_examples.py` runs every script of `examples/`
+in a fresh interpreter and checks what it prints. `bench/matrix.sh VENV...` reproduces the CI matrix locally (stack
+default / unlimited / 1 MiB, engines present, bwrap absent, bwrap failing; fresh HOME per run).
+
+`python -m qraft_ra.reproduce` re-measures the numerical claims of this file offline, one `[PASS]`/`[FAIL]` line per
+claim with the measured and the published value (fast set: 22 s on the author's machine; `--full` adds the
+40 025-value Mathieu grid and the 200 wide-range transmons: 108 s); `--sabotage` alters the Mathieu solver and must
+show at least one `[FAIL]` (positive control); `--readme` checks that every published value appears verbatim here and
+is run by `python check_tree.py`, so a number edited by hand fails the tree check. Measured on 2026-11-11 on this
+tree: fast set 10 of 10 PASS, `--full` 11 of 11, `--sabotage` 1 FAIL.
+
+Determinism: `python -m qraft_ra.reproduce --hash` prints the sha256 of a fixed set of exact enclosures. Measured on
+2026-11-11: `c3ae60dd0a4ab2db23f0091269777fe24e4d2acc2434e7298d860e6437c8cd0c` on Python 3.11.2 (numpy 2.4.6, scipy
+1.17.1), 3.12.15, 3.13.15 and 3.14.8 (numpy 2.5.4, scipy 1.18.1), Linux x86-64; the CI jobs print it on Linux ARM64,
+macOS and Windows (not run yet: the result is not known).
 
 CI: the workflow of 0.3.0 (`.github/workflows/ci.yml`: Linux x86-64 3.10–3.14 with three stack sizes and the
 bwrap/podman/docker engines, Linux ARM64, macOS, Windows, free-threaded 3.14t) has not run yet: it runs when this

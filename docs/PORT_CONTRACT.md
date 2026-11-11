@@ -1,9 +1,10 @@
-# Port contract "qraft-port/0.2" and the isolation engines
+# Port contract "qraft-port/0.3" and the isolation engines
 
 Specification of the multiport (`qraft_ra.multiport`, runner `qraft_ra.port_runner`). Written on 2026-11-11
-(21:05 CET, system clock) before the code of 0.3.0; it supersedes the unpublished contract "qraft-porta/0.1" of 0.2.0
-(same structure, Italian keys), which is no longer accepted by the runner or the validator: a document carrying
-"qraft-porta/0.1" is INVALID with the reason `contract 'qraft-porta/0.1' ≠ qraft-port/0.2`.
+(21:05 CET, system clock; §8 batches added 22:10 CET) before the code of 0.3.0; it supersedes the unpublished contract
+"qraft-porta/0.1" of 0.2.0 (same structure, Italian keys) and "qraft-port/0.2" (same as 0.3 without §8), which are no
+longer accepted by the runner or the validator: a document carrying another contract string is INVALID with the
+reason `contract '…' ≠ qraft-port/0.3`.
 
 ## 1. Request (host → port), file `request.json`
 
@@ -11,7 +12,7 @@ JSON object with EXACTLY these keys (an unknown or missing key is refused on the
 
 | key | type | meaning |
 |---|---|---|
-| `contract` | string | `"qraft-port/0.2"` |
+| `contract` | string | `"qraft-port/0.3"` |
 | `port` | string | one of the closed list `PORTS` (§3) |
 | `model` | object | `type` plus the keys of that type (§2); nothing else |
 | `levels` | integer 1…10000 | number of levels requested |
@@ -46,7 +47,7 @@ EXACTLY the ones listed and the model type is fixed (`cos_rotor`, `cos_rotor`, `
 
 ## 4. Output (port → host), file `output.json`
 
-JSON object with EXACTLY these keys: `contract` (= `"qraft-port/0.2"`), `port` (= the one requested),
+JSON object with EXACTLY these keys: `contract` (= `"qraft-port/0.3"`), `port` (= the one requested),
 `solver_version` (string), `levels` (list; with state `OK` exactly `levels` finite real numbers, in `unit`), `unit`
 (GHz/MHz/Hz), `state` (`"OK"` or `"ERROR"`), `reason` (string), `seconds` (finite number).
 The host reads it as a regular file (no symlink, no FIFO), at most 1 MiB, strict JSON (no NaN/Infinity, no duplicate
@@ -126,6 +127,16 @@ dirty-output checks pass; S3-memory, S6, S7 need numpy and are skipped with that
 
 6.6 What no engine claims: protection against kernel exploits, side channels, or a compromised engine binary; the
 physics of the other solver.
+
+## 8. Batches (`run_ports`)
+
+Several requests can share one sandbox process (the import of the solver, seconds per run, is paid once): the host
+writes `requests.json` = a JSON list of request objects (§1, each complete, same `site_packages`), the runner answers
+with `outputs.json` = a JSON list of output objects (§4) in the same order and of the same length (a shorter or
+longer list, or a non-list, makes every output of the batch INVALID). The rlimits of the runner are the maxima of the
+`limits` of the batch; the host timeout is the sum of the `seconds` plus 5. Each output is validated against its own
+request (§4); the port of request i must be the port of output i. A batch of one request is equivalent to §1–§4
+with `request.json`/`output.json`. Measured 2026-11-11 (`bench/multiport_batch.py`, bwrap): see README.
 
 ## 7. Versioning
 

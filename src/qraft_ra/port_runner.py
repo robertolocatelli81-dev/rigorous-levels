@@ -2,7 +2,8 @@
 # Copyright 2026 Roberto Locatelli
 """qraft_ra/port_runner.py — runner of the PORTS of the multiport: it runs INSIDE the sandbox (bwrap, podman, docker),
 never in the process of QRAFT-RA. Reads <folder>/request.json, runs the port (closed list), writes <folder>/output.json.
-Specification: docs/PORT_CONTRACT.md (contract "qraft-port/0.2").
+Specification: docs/PORT_CONTRACT.md (contract "qraft-port/0.3"; §8: `requests.json` → `outputs.json` for a batch
+in one process).
 The `test_*` ports exist ONLY for the positive controls of the sandbox (network, writes, time, memory, dirty output,
 wrong solver, hostile behaviour). None of them is a solver.
 This file imports nothing from QRAFT-RA: it is self-contained (numpy and the solvers come from the declared
@@ -23,7 +24,7 @@ try:
 except ImportError:                 # pragma: no cover
     socket = None
 
-CONTRACT = "qraft-port/0.2"
+CONTRACT = "qraft-port/0.3"
 H_PLANCK = 6.62607015e-34
 
 
@@ -375,20 +376,11 @@ PORTS = {
 }
 
 
-def main(folder: str) -> int:
-    t0 = time.time()
-    for v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
-        os.environ.setdefault(v, "1")               # before numpy: BLAS threads under RLIMIT_AS fail (SIGINT)
-    with open(os.path.join(folder, "request.json"), encoding="utf-8") as f:
-        r = json.load(f)
-    output = {"contract": CONTRACT, "port": r.get("port"), "solver_version": "", "levels": [],
-              "unit": r.get("unit"), "state": "ERROR", "reason": "", "seconds": 0.0}
+def _run_one(r: dict, output: dict) -> None:
+    """Runs one request into `output` (already carrying the ERROR skeleton); never raises."""
     try:
         if r.get("contract") != CONTRACT:
             raise RuntimeError(f"contract {r.get('contract')!r} is not {CONTRACT}")
-        _rlimit(int(r["limits"]["seconds"]), int(r["limits"]["mem_mib"]))
-        for sp in r.get("site_packages", []):
-            sys.path.insert(0, sp)
         fn = PORTS.get(r["port"])
         if fn is None:
             raise RuntimeError(f"port {r['port']!r} not in the closed list")
@@ -402,10 +394,48 @@ def main(folder: str) -> int:
     except BaseException as e:  # noqa: BLE001 — whatever happens, the output is a JSON with the reason
         tb = traceback.format_exc().strip().splitlines()
         output["reason"] = (f"{type(e).__name__}: {e}" + (" | " + " / ".join(tb[-3:-1]) if not isinstance(e, RuntimeError) else ""))[:600]
-    output["seconds"] = round(time.time() - t0, 3)
+
+
+def _skeleton(r) -> dict:
+    r = r if isinstance(r, dict) else {}
+    return {"contract": CONTRACT, "port": r.get("port"), "solver_version": "", "levels": [],
+            "unit": r.get("unit"), "state": "ERROR", "reason": "", "seconds": 0.0}
+
+
+def main(folder: str) -> int:
+    t0 = time.time()
+    for v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        os.environ.setdefault(v, "1")               # before numpy: BLAS threads under RLIMIT_AS fail (SIGINT)
+    batch = os.path.isfile(os.path.join(folder, "requests.json"))
+    with open(os.path.join(folder, "requests.json" if batch else "request.json"), encoding="utf-8") as f:
+        doc = json.load(f)
+    reqs = doc if batch else [doc]
+    if not isinstance(reqs, list) or not reqs:
+        reqs = [{}]
+    outputs = [_skeleton(r) for r in reqs]
+    try:
+        limits = [r.get("limits", {}) for r in reqs if isinstance(r, dict)]
+        _rlimit(max(int(x.get("seconds", 1)) for x in limits), max(int(x.get("mem_mib", 16)) for x in limits))
+        seen = []
+        for r in reqs:
+            for sp in (r.get("site_packages", []) if isinstance(r, dict) else []):
+                if sp not in seen:
+                    seen.append(sp)
+                    sys.path.insert(0, sp)
+    except BaseException as e:  # noqa: BLE001
+        for o in outputs:
+            o["reason"] = f"{type(e).__name__}: {e}"[:600]
+        reqs = []
+    for r, o in zip(reqs, outputs):
+        t1 = time.time()
+        if isinstance(r, dict):
+            _run_one(r, o)
+        else:
+            o["reason"] = "request is not an object"
+        o["seconds"] = round(time.time() - t1, 3)
     with open(os.path.join(_output_dir(folder), "output.json"), "w", encoding="utf-8") as f:
-        json.dump(output, f)
-    return 0 if output["state"] == "OK" else 1
+        json.dump(outputs if batch else outputs[0], f)
+    return 0 if all(o["state"] == "OK" for o in outputs) else 1
 
 
 if __name__ == "__main__":

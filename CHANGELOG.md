@@ -130,6 +130,30 @@ Not translated: test method names and test docstrings (prose, not API), kept fro
   ports, so that every engine, WebAssembly included, runs the full S1–S7 (measured: 16 of 17 tests of
   `TestSandbox_wasm` run, the only skip is the scqubits/diatomic-py solver test); `python_rotor` agrees with
   numpy's `eigvalsh` within 1e-11 GHz.
+- `python -m qraft_ra.reproduce`: re-measures the numerical claims of the README offline (one [PASS]/[FAIL] line per
+  claim with the measured and the published value; fast set 22 s, `--full` adds the 40 025-value Mathieu grid and the
+  200 wide-range transmons, 108 s); `--sabotage` swaps the Mathieu sector as a positive control (at least one FAIL);
+  `--readme` checks that every published value appears verbatim in README.md and is run by `check_tree.py` (a number
+  edited by hand fails the tree check: positive control included); `--hash` prints the sha256 of a fixed set of
+  exact enclosures: identical on Python 3.11 (numpy 2.4.6, scipy 1.17.1), 3.12, 3.13 and 3.14 (numpy 2.5.4, scipy
+  1.18.1) on Linux x86-64 (c3ae60dd…); the CI jobs print it on every platform.
+- Benches inside the tree for every row of the README tables: `bench/readme_numbers.py`, `mathieu_vs_scipy.py` (also
+  the fine grid of qiskit-metal #1252), `gregory2016.py` (the 16 RbCs lines), `real_transmons.py` (the 6 transmons of
+  arXiv:2407.17407), `duffing_adapter_sphere.py`,
+  `fluxonium_devices.py`, `parameter_balls.py`, `matrix_elements.py`, `check_200.py`, `multiport_batch.py`,
+  `compare_tools.py`. Re-measured here with the absolute criterion (error > 1e-6 GHz): scqubits at ncut 30 wrong in 70
+  of the 200 wide-range transmons (smallest E_J/E_C 5542), all 70 flagged by the adapter, 0 false alarms, 0 missed
+  (the 65 at ≥ 7744 of the README of 0.2.0 use the relative criterion of `readme_numbers.py`: both stated).
+- `check(scqubits_obj, tolerance=…)` (= `guaranteed_from_scqubits`) and `assert_inside(levels, intervals, tolerance)`
+  for other people's regression tests (`examples/regression_assert.py`: fails on scipy's sparse `eigsh` from 1.15.0
+  on, which omits the exact zero eigenvalue of 4E_C n², and passes on the dense solver).
+- `tests/test_cos4phi_origin.py`: H = h2·n² + c2·cos 4φ of the author's earlier work with a fixed cut Nb = 40: inside
+  for three parameter sets, OFF by 1.4e-11 for (h2, c2) = (0.25, 60) (first cut inside between 41 and 60); Nb = 2
+  outside for all (positive control).
+- Multiport batches (`run_ports`, contract "qraft-port/0.3" §8): 100 requests in one sandbox process: 0.012 s
+  (numpy_rotor) and 0.023 s (python_rotor) per case against 1.0–1.1 s per single run (podman), outputs equal to the
+  single runs; `site_packages_of("scqubits")` finds the folder to mount (no placeholder in the examples).
+- Tests are discoverable (`python -m unittest discover -s tests`); CITATION.cff; examples/ run by the tests.
 - Not done: nothing of A–D is deferred. The deprecated Italian aliases stay (cost: one module and one test).
 
 ### Other

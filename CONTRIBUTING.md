@@ -27,7 +27,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install -r requirements/ci.txt && pip install --no-deps .
 cd tests && python -B -m unittest test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_readme_example \
     test_spherical_rotor test_hyperfine_molecule test_inputs_review test_duffing_vs_transmon test_mathieu test_fluxonium \
-    test_multiport test_port_centrex_tlf test_parameter_balls test_matrix_elements test_examples test_generative_inputs test_deprecated_aliases && cd ..
+    test_multiport test_port_centrex_tlf test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases && cd ..
 git add -A                      # check_tree.py lists files with git (tracked + untracked, .gitignore respected)
 python check_tree.py --update   # needs gitleaks on PATH
 python check_tree.py --positive-control

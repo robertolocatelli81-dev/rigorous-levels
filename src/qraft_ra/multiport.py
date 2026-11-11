@@ -26,7 +26,7 @@ Runner: qraft_ra/port_runner.py. Specification: docs/PORT_CONTRACT.md (written b
 What it is NOT: a certificate of the computation; a virtual machine; a judgement on the physics of the other solver.
 QRAFT-RA is an internal model, not an external validator.
 Names: this module was `multiporta` in 0.2.0 (deprecated aliases in that module); the contract "qraft-porta/0.1"
-(Italian keys) is superseded by "qraft-port/0.2" and is no longer accepted."""
+(Italian keys) and "qraft-port/0.2" are superseded by "qraft-port/0.3" (§8 batches added) and no longer accepted."""
 from __future__ import annotations
 
 import json
@@ -46,13 +46,14 @@ from qraft_ra._compat import add_field_aliases
 from qraft_ra.guaranteed_intervals import Intervals, OutOfDomain
 from qraft_ra.isolation import ENGINES, SandboxMissing  # noqa: F401
 
-__all__ = ["CONTRACT", "PORTS", "ENGINES", "Request", "Output", "Verdict", "SandboxMissing", "run_port", "compare",
-           "validate_output", "read_output", "OutOfDomain"]
+__all__ = ["CONTRACT", "PORTS", "ENGINES", "Request", "Output", "Verdict", "SandboxMissing", "run_port", "run_ports",
+           "compare", "validate_output", "read_output", "site_packages_of", "OutOfDomain"]
 
-CONTRACT = "qraft-port/0.2"
+CONTRACT = "qraft-port/0.3"
 UNITS = {"GHz": Fraction(10 ** 9), "MHz": Fraction(10 ** 6), "Hz": Fraction(1)}
 SECONDS_MAX, MEM_MIB_MAX, LEVELS_MAX = 3600, 65536, 10000       # declared caps (seconds 2**31 gave OverflowError)
-OUTPUT_MAX_BYTES = 1 << 20                                      # the output is read for at most 1 MiB
+OUTPUT_MAX_BYTES = 1 << 20                                      # the output is read for at most 1 MiB (×n for a batch)
+BATCH_MAX = 1000                                                # largest batch (declared cap)
 OUTPUT_MAX_DEPTH = 32                                           # largest nesting of [ and { in the output
 TMPFS_BYTES = isolation.TMPFS_BYTES                              # /tmp, /home, /dev/shm of the sandbox: RAM cap
 JMAX_TLF = 20                                                   # tlf_centrex: J ≤ 20 = 1764 states, 0.4 s, 47 MiB
@@ -176,6 +177,32 @@ class Output:
     sandbox: str
 
 
+def site_packages_of(*modules: str) -> Tuple[str, ...]:
+    """The site-packages (or dist-packages) folders that hold the given installed modules, for `Request.site_packages`:
+    `site_packages_of("scqubits")`. A module that is not installed, or that lives outside a site-packages folder (an
+    editable install, a source tree), is refused with the reason: nothing else would be mounted."""
+    import importlib.util
+    out = []
+    for name in modules:
+        if not isinstance(name, str) or not name.isidentifier():
+            raise OutOfDomain(f"module name {name!r}: expected an identifier")
+        spec = importlib.util.find_spec(name)
+        if spec is None or not spec.origin:
+            raise OutOfDomain(f"module {name!r} is not installed")
+        folder = os.path.dirname(os.path.realpath(spec.origin))
+        while folder and os.path.basename(folder) not in ("site-packages", "dist-packages"):
+            parent = os.path.dirname(folder)
+            if parent == folder:
+                folder = ""
+                break
+            folder = parent
+        if not folder:
+            raise OutOfDomain(f"module {name!r} is not inside a site-packages folder ({spec.origin}): not mountable")
+        if folder not in out:
+            out.append(folder)
+    return tuple(out)
+
+
 def validate_output(doc: object, r: Request) -> Tuple[Optional[Output], str]:
     """CLOSED schema: (Output, "") if valid, (None, reason) otherwise. No unknown key passes."""
     if not isinstance(doc, dict):
@@ -251,7 +278,7 @@ def _json_depth(text: str, limit: int) -> int:
     return m
 
 
-def read_output(path: str) -> Tuple[Optional[object], str]:
+def read_output(path: str, max_bytes: int = OUTPUT_MAX_BYTES) -> Tuple[Optional[object], str]:
     """Reads output.json as a REGULAR file (O_NOFOLLOW), at most OUTPUT_MAX_BYTES, strict JSON: no NaN/Infinity, no
     duplicate keys, nesting at most OUTPUT_MAX_DEPTH levels, counted BEFORE the parser (the parser's recursion limit
     changes between Python versions: on CPython 3.14.10 an object nested 100 000 times passed).
@@ -266,12 +293,12 @@ def read_output(path: str) -> Tuple[Optional[object], str]:
             return None, "output is not a regular file"
         with os.fdopen(fd, "rb") as f:
             fd = -1
-            data = f.read(OUTPUT_MAX_BYTES + 1)
+            data = f.read(max_bytes + 1)
     finally:
         if fd >= 0:
             os.close(fd)
-    if len(data) > OUTPUT_MAX_BYTES:
-        return None, f"output over {OUTPUT_MAX_BYTES} bytes"
+    if len(data) > max_bytes:
+        return None, f"output over {max_bytes} bytes"
     try:
         text = data.decode("utf-8")
         if _json_depth(text, OUTPUT_MAX_DEPTH) > OUTPUT_MAX_DEPTH:
@@ -279,6 +306,64 @@ def read_output(path: str) -> Tuple[Optional[object], str]:
         return json.loads(text, object_pairs_hook=_no_dup, parse_constant=_no_constant), ""
     except (ValueError, RecursionError) as e:
         return None, f"output not JSON: {type(e).__name__}: {str(e)[:200]}"
+
+
+def run_ports(requests, python: Optional[str] = None, *, engine: str = "auto", image: Optional[str] = None) -> Tuple[Output, ...]:
+    """Several requests in ONE sandbox process (docs/PORT_CONTRACT.md §8): the solver is imported once. All requests
+    must share `site_packages`; the rlimits are the maxima of their limits and the host timeout the sum of their
+    seconds + 5. Returns one Output per request, in order; a malformed batch answer makes every output INVALID."""
+    reqs = tuple(requests) if isinstance(requests, (list, tuple)) else None
+    if not reqs or not all(isinstance(r, Request) for r in reqs):
+        raise OutOfDomain("expected a non-empty list of Request")
+    if len(reqs) > BATCH_MAX:
+        raise OutOfDomain(f"batch: at most {BATCH_MAX} requests")
+    if len({r.site_packages for r in reqs}) != 1:
+        raise OutOfDomain("batch: every request must declare the same site_packages")
+    if engine not in ENGINES:
+        raise OutOfDomain(f"engine {engine!r} not in the closed list {ENGINES}")
+    if engine == "auto":
+        engine, _ = isolation.select_engine(image)
+    else:
+        isolation.probe(engine, image)
+    seconds = min(sum(r.seconds for r in reqs), SECONDS_MAX)
+    mem = max(r.mem_mib for r in reqs)
+    work = tempfile.mkdtemp(prefix="qraft_port_")
+    outdir = tempfile.mkdtemp(prefix="qraft_out_")
+    try:
+        with open(os.path.join(work, "requests.json"), "w", encoding="utf-8") as f:
+            json.dump([r.json() for r in reqs], f)
+        shutil.copy(RUNNER, os.path.join(work, isolation.RUNNER_NAME))
+        out_path = os.path.join(outdir, "output.json")
+        open(out_path, "wb").close()
+        open(os.path.join(work, "output.json"), "wb").close()
+        rc, timed_out, descr = isolation.run(engine, work, out_path, seconds, mem, list(reqs[0].site_packages), python, image)
+        descr = f"{engine} (batch of {len(reqs)}): {descr}"
+        if timed_out:
+            return tuple(_invalid(r, f"timeout: over {seconds + 5} s (batch)", float(seconds + 5), descr) for r in reqs)
+        err_path = os.path.join(work, "stderr.txt")
+        tail = ""
+        if os.path.isfile(err_path):
+            with open(err_path, "rb") as ferr:
+                ferr.seek(max(0, os.path.getsize(err_path) - 600))
+                tail = ferr.read().decode("utf-8", "replace")
+        if os.path.getsize(out_path) == 0:
+            return tuple(_invalid(r, f"no output (exit code {rc}): {tail}", 0.0, descr) for r in reqs)
+        doc, reason = read_output(out_path, OUTPUT_MAX_BYTES * len(reqs))
+        if doc is None:
+            return tuple(_invalid(r, reason, 0.0, descr) for r in reqs)
+        if not isinstance(doc, list) or len(doc) != len(reqs):
+            return tuple(_invalid(r, f"batch: expected a list of {len(reqs)} outputs", 0.0, descr) for r in reqs)
+        outs = []
+        for r, d in zip(reqs, doc):
+            u, reason = validate_output(d, r)
+            if u is None:
+                outs.append(_invalid(r, f"schema: {reason}", 0.0, descr))
+            else:
+                outs.append(Output(u.port, u.solver_version, u.levels, u.unit, u.state, u.reason, u.seconds, descr))
+        return tuple(outs)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(outdir, ignore_errors=True)
 
 
 def run_port(r: Request, python: Optional[str] = None, *, engine: str = "auto", image: Optional[str] = None) -> Output:

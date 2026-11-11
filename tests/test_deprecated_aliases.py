@@ -73,7 +73,7 @@ class TestAliases(unittest.TestCase):
             self.assertEqual(r.port, "numpy_rotor")
             u = MP.Uscita("numpy_rotor", "v", (1.0, 2.0, 3.0), "GHz", "OK", "", 0.0, "")
             self.assertEqual(u.stato, "OK")
-            self.assertEqual(MP.CONTRATTO, "qraft-port/0.2")
+            self.assertEqual(MP.CONTRATTO, "qraft-port/0.3")
             self.assertEqual(SA.REGOLA, "scq-threshold/1.0")
             self.assertEqual(SA.NON_CONVERGENTE, "NOT_CONVERGED")
             self.assertEqual(SA.disponibile()["present"], SA.available()["present"])

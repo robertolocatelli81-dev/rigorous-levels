@@ -61,13 +61,19 @@ jobs:
           ulimit -s
           cd tests
           python -c 'import qraft_ra; assert "site-packages" in qraft_ra.__file__, qraft_ra.__file__; print(qraft_ra.__file__)'
-          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_readme_example test_spherical_rotor test_hyperfine_molecule test_inputs_review test_duffing_vs_transmon test_multiport test_port_centrex_tlf test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_examples test_generative_inputs test_deprecated_aliases 2>&1 | tee ../unittest.log
+          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_readme_example test_spherical_rotor test_hyperfine_molecule test_inputs_review test_duffing_vs_transmon test_multiport test_port_centrex_tlf test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           for e in bwrap podman docker; do grep -q "TestSandbox_$e.test_s1_rete_bloccata) ... ok" ../unittest.log || { echo "engine $e: the S1 test did not run"; exit 1; }; done
       - name: Deprecated Italian aliases are the only source of DeprecationWarning (the English API is warning-free)
         run: |
           cd tests
           python -W error::DeprecationWarning -B -m unittest test_guaranteed_intervals test_rotor_spectrum test_mathieu
+      - name: Re-measure the README claims offline (fast set), the sabotage positive control, the determinism hash, and unittest discover
+        run: |
+          python -m qraft_ra.reproduce
+          python -m qraft_ra.reproduce --sabotage
+          echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (python ${{ matrix.python }}, stack ${{ matrix.stack }})"
+          python -B -m unittest discover -s tests -t tests -p "test_*.py" > /dev/null 2>&1 && echo "unittest discover: OK"
 
   # ── Linux ARM64: bwrap + docker (podman is installed too), Python 3.12 and 3.14 ──
   linux-arm:
@@ -96,9 +102,10 @@ jobs:
           python -m pip install -r requirements/ci.txt
           python -m pip install --no-deps .
           cd tests
-          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_spherical_rotor test_hyperfine_molecule test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_generative_inputs 2>&1 | tee ../unittest.log
+          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_spherical_rotor test_hyperfine_molecule test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_generative_inputs 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           for e in bwrap docker; do grep -q "TestSandbox_$e.test_s1_rete_bloccata) ... ok" ../unittest.log || { echo "engine $e: the S1 test did not run"; exit 1; }; done
+          cd .. && python -m qraft_ra.reproduce && echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (linux-arm, python ${{ matrix.python }})"
 
   # ── macOS (ARM64 runner): everything that is not a sandbox, plus the sandbox-exec engine (S1–S7) ──
   macos:
@@ -125,9 +132,10 @@ jobs:
           python -m pip install -r requirements/ci.txt
           python -m pip install --no-deps .
           cd tests
-          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_spherical_rotor test_hyperfine_molecule test_duffing_vs_transmon test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_examples test_generative_inputs test_deprecated_aliases 2>&1 | tee ../unittest.log
+          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_spherical_rotor test_hyperfine_molecule test_duffing_vs_transmon test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           grep -q "TestSandbox_sandbox_exec.test_s1_rete_bloccata) ... ok" ../unittest.log || { echo "sandbox-exec: the S1 test did not run"; exit 1; }
+          cd .. && python -m qraft_ra.reproduce && echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (macos, python ${{ matrix.python }})"
 
   # ── Windows: everything that is not a sandbox, plus the AppContainer + Job Object engine (S1–S7) ──
   windows:
@@ -149,9 +157,10 @@ jobs:
           python -m pip install -r requirements/ci.txt
           python -m pip install --no-deps .
           cd tests
-          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_spherical_rotor test_hyperfine_molecule test_duffing_vs_transmon test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_examples test_generative_inputs test_deprecated_aliases 2>&1 | tee ../unittest.log
+          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_spherical_rotor test_hyperfine_molecule test_duffing_vs_transmon test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           grep -q "TestSandbox_appcontainer.test_s1_rete_bloccata) ... ok" ../unittest.log || { echo "appcontainer: the S1 test did not run"; exit 1; }
+          cd .. && python -m qraft_ra.reproduce && echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (windows, python ${{ matrix.python }})"
 
   # ── Free-threaded Python 3.14t: the pure-math modules (python-flint publishes cp314t wheels? measured here: the job
   #    reports which dependencies have wheels and skips the modules whose dependency is missing) ──

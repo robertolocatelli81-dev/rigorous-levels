@@ -85,7 +85,7 @@ class TestContrattoChiuso(unittest.TestCase):
         u, m = MP.validate_output(buona, r)
         self.assertIsNotNone(u, m)
         deformazioni = [dict(buona, extra=1), {k: v for k, v in buona.items() if k != "reason"},
-                        dict(buona, contract="qraft-porta/0.1"), dict(buona, contract="qraft-port/0.3"), dict(buona, port="test_wrong"),
+                        dict(buona, contract="qraft-porta/0.1"), dict(buona, contract="qraft-port/0.2"), dict(buona, port="test_wrong"),
                         dict(buona, state="BOH"), dict(buona, state=1), dict(buona, unit="eV"),
                         dict(buona, levels=[0.0] * 5), dict(buona, levels=[0.0] * 7), dict(buona, levels="0"),
                         dict(buona, levels=[float("nan")] * 6), dict(buona, levels=[True] * 6),
@@ -120,6 +120,9 @@ class _SandboxTests:
 
     def run_port(self, r, **kw):
         return MP.run_port(r, engine=self.ENGINE, **kw)
+
+    def run_ports(self, rs, **kw):
+        return MP.run_ports(rs, engine=self.ENGINE, **kw)
 
     def skip_without_numpy(self):
         if self.ENGINE not in NUMPY_ENGINES:
@@ -160,6 +163,41 @@ class _SandboxTests:
     def test_engine_named_in_output(self):
         u = self.run_port(request("test_dirty_output"))
         self.assertTrue(u.sandbox.startswith(self.ENGINE + ": "), u.sandbox)
+
+    def test_batch_in_one_sandbox(self):
+        """§8: 20 requests in one process give 20 outputs (OK, each validated against its own request), the same
+        levels as single runs, a wrong port among them is ERROR without touching the others, and the batch is
+        faster per case than single runs (the solver import is paid once)."""
+        import time
+        reqs = [request("python_rotor", model={**ROTOR, "E_J": 10.0 + i}) for i in range(20)]
+        reqs[7] = request("test_wrong", model={**ROTOR, "E_J": 17.0})
+        t0 = time.perf_counter()
+        outs = self.run_ports(reqs)
+        batch_time = time.perf_counter() - t0
+        self.assertEqual(len(outs), 20)
+        for i, (r, u) in enumerate(zip(reqs, outs)):
+            self.assertEqual(u.state, "OK", (i, u))
+            self.assertEqual(u.port, r.port)
+            self.assertIn("batch of 20", u.sandbox)
+        single = self.run_port(reqs[3])
+        self.assertEqual(outs[3].levels, single.levels)
+        t0 = time.perf_counter()
+        self.run_port(reqs[0])
+        self.run_port(reqs[1])
+        two_single = time.perf_counter() - t0
+        self.assertLess(batch_time / 20, two_single / 2, (batch_time, two_single))
+        bad = request("test_hostile", truncation={"mode": "nope"})
+        outs = self.run_ports([reqs[0], bad, reqs[1]])
+        self.assertEqual([u.state for u in outs], ["OK", "ERROR", "OK"])
+        self.assertIn("unknown", outs[1].reason)
+
+    def test_batch_closed(self):
+        with self.assertRaises(MP.OutOfDomain):
+            self.run_ports([])
+        with self.assertRaises(MP.OutOfDomain):
+            self.run_ports([request("python_rotor"), "x"])
+        with self.assertRaises(MP.OutOfDomain):
+            self.run_ports(request("python_rotor"))
 
     def test_python_rotor_equals_numpy_rotor(self):
         """The pure-Python reference (Sturm bisection) agrees with numpy's eigvalsh within 1e-11 GHz: it is the

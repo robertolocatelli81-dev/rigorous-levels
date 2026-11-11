@@ -7,10 +7,12 @@ Fails (exit 1) with one reason per defect found:
      the tests, and a closed list of third-party packages);
   3. a string matching a deny-list of generic rules (home-directory paths, hidden folders under ~, e-mail addresses,
      tailnet host names and addresses);
-  4. a secret found by gitleaks (gitleaks missing = error, not a skip).
+  4. a secret found by gitleaks (gitleaks missing = error, not a skip);
+  5. a numerical claim of README.md whose published value is not in the README any more (src/qraft_ra/reproduce.py
+     --readme, loaded by path: a number edited by hand in the README fails here).
 --positive-control copies the repository to a temporary folder, checks that the untouched copy passes and that each of
-six alterations (import of a module that is not allowed, unlisted file, deleted listed file, home-directory path, hidden
-folder under ~, fake secret) makes it fail with the expected reason, and that --update makes an edited copy, and a copy
+seven alterations (import of a module that is not allowed, unlisted file, deleted listed file, home-directory path, hidden
+folder under ~, fake secret, a README number edited by hand) makes it fail with the expected reason, and that --update makes an edited copy, and a copy
 with a file added and one deleted, pass again; and that the command line --update changes only the edited
 line, still fails on a defect left, and refuses an extra argument.
 --update rewrites FILE_LIST.tsv: new sha256 for the listed files, unlisted files added with kind "new", entries of
@@ -174,6 +176,27 @@ def gitleaks(radice, difetti):
             difetti.append(f"gitleaks {c[1]} error rc={r.returncode}")
 
 
+def readme_claims(radice, difetti):
+    """src/qraft_ra/reproduce.py (loaded by path, no dependency needed) lists the published values: each one must
+    appear verbatim in README.md."""
+    import importlib.util
+    percorso = os.path.join(radice, "src", "qraft_ra", "reproduce.py")
+    if not os.path.isfile(percorso):
+        difetti.append("reproduce_missing src/qraft_ra/reproduce.py")
+        return
+    spec = importlib.util.spec_from_file_location("qraft_ra_reproduce_check", percorso)
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+        mod.README = os.path.join(radice, "README.md")
+        mancanti = mod.readme_check()
+    except Exception as e:  # noqa: BLE001 — a reproduce.py that cannot be loaded is a defect, not a skip
+        difetti.append(f"reproduce_unloadable {type(e).__name__}: {e}")
+        return
+    for m in mancanti:
+        difetti.append(f"readme_claim_missing {m}")
+
+
 def controlla(radice):
     difetti = []
     if not os.path.isfile(os.path.join(radice, ELENCO)):
@@ -201,6 +224,7 @@ def controlla(radice):
             controlla_import(p, testo, nudi, qualificati, nomi_pacchetto, difetti)
         controlla_stringhe(p, testo, difetti)
     gitleaks(radice, difetti)
+    readme_claims(radice, difetti)
     return difetti
 
 
@@ -246,6 +270,13 @@ def controllo_positivo(radice):
         with open(os.path.join(d, p), "a", encoding="utf-8") as f:
             f.write(testo)
 
+    def sostituisci(d, p, vecchio, nuovo):
+        with open(os.path.join(d, p), encoding="utf-8") as f:
+            testo = f.read()
+        assert vecchio in testo, vecchio
+        with open(os.path.join(d, p), "w", encoding="utf-8") as f:
+            f.write(testo.replace(vecchio, nuovo))
+
     def indicizza(d):   # the deleted file stays in the git index, as in a clone where it was not "git rm"-ed
         subprocess.run(["git", "-C", d, "add", "-A"], check=True)
 
@@ -264,6 +295,8 @@ def controllo_positivo(radice):
          lambda d: (indicizza(d), aggiungi(d, "src/qraft_ra/extraneous.py", "X = 1\n"),
                     os.remove(os.path.join(d, "tests", "test_readme_example.py")), aggiorna(d)), None),
         ("fake secret", lambda d: aggiungi(d, "README.md", f'\ngithub_token = "{finto}"\n'), "secret"),
+        ("README number edited by hand", lambda d: sostituisci(d, "README.md", "3.788378597 3.788378597", "3.788378598 3.788378597"),
+         "readme_claim_missing"),
     ]
     esito = 0
     for nome, altera, atteso in casi:

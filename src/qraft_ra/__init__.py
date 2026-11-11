@@ -26,15 +26,16 @@ from qraft_ra.fluxonium import Fluxonium, guaranteed_fluxonium_levels  # noqa: E
 from qraft_ra.parameter_balls import RotorBall, guaranteed_levels_over_box  # noqa: E402
 from qraft_ra.matrix_elements import MatrixElement, guaranteed_matrix_element  # noqa: E402
 from qraft_ra.duffing_vs_transmon import DuffingError, duffing_error  # noqa: E402
-from qraft_ra.scqubits_adapter import (OK_FLOAT_FLOOR, UNCHECKED, ScqubitsMissing, ScqubitsSpectrum,  # noqa: E402
-                                       guaranteed_from_scqubits, scqubits_spectrum)
-from qraft_ra.multiport import ENGINES, PORTS, Output, Request, SandboxMissing, Verdict, compare, run_port  # noqa: E402
+from qraft_ra.scqubits_adapter import (OK_FLOAT_FLOOR, UNCHECKED, ScqubitsCheck, ScqubitsMissing, ScqubitsSpectrum,  # noqa: E402
+                                       assert_inside, check, guaranteed_from_scqubits, scqubits_spectrum)
+from qraft_ra.multiport import (ENGINES, PORTS, Output, Request, SandboxMissing, Verdict, compare, run_port,  # noqa: E402
+                                run_ports, site_packages_of)
 
 __all__ = ["__version__", "GUARANTEED", "WIDE", "OK", "NOT_CONVERGED", "UNCHECKED", "OK_FLOAT_FLOOR",
            "ArbMissing", "DeadlineExceeded", "OutOfDomain", "InputRejected", "ScqubitsMissing", "SandboxMissing",
            "Intervals", "Rotor", "Spectrum", "SphericalRotor", "SigmaMolecule", "MathieuValue", "Fluxonium", "RotorBall", "MatrixElement",
-           "DuffingError", "ScqubitsSpectrum", "Request", "Output", "Verdict", "ENGINES", "PORTS",
+           "DuffingError", "ScqubitsSpectrum", "ScqubitsCheck", "Request", "Output", "Verdict", "ENGINES", "PORTS",
            "guaranteed_levels", "spectrum", "guaranteed_sphere_levels", "guaranteed_molecule_levels", "sector_dimension",
            "zeeman_hz", "mathieu_a", "mathieu_b", "mathieu_value", "guaranteed_fluxonium_levels",
-           "guaranteed_levels_over_box", "guaranteed_matrix_element", "duffing_error", "scqubits_spectrum", "guaranteed_from_scqubits", "run_port",
-           "compare"]
+           "guaranteed_levels_over_box", "guaranteed_matrix_element", "duffing_error", "scqubits_spectrum", "guaranteed_from_scqubits",
+           "check", "assert_inside", "run_port", "run_ports", "compare", "site_packages_of"]

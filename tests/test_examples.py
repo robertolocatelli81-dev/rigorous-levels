@@ -53,9 +53,23 @@ class TestExamples(unittest.TestCase):
         self.assertIn("|<0|n|1>| in [1.08780085731", out)
         self.assertIn("<1|n|1> at n_g = 1/2 contains 1/2: True", out)
 
+    def test_regression_assert(self):
+        """The helper passes on the dense levels; on the sparse eigsh levels it raises from scipy 1.15.0 on (the
+        exact zero is omitted) and passes before (measured: 1.14.1 right)."""
+        import scipy
+        rc, out, err = run("regression_assert.py")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("dense eigvalsh: [0.  1.2 1.2 4.8] -> inside", out)
+        major, minor = (int(x) for x in scipy.__version__.split(".")[:2])
+        if (major, minor) >= (1, 15):
+            self.assertIn("-> AssertionError: OUTSIDE", out)
+        else:
+            self.assertIn("-> inside", out.splitlines()[-1])
+
     def test_every_example_is_covered(self):
         scripts = sorted(p.name for p in EXAMPLES.glob("*.py"))
-        self.assertEqual(scripts, ["from_scqubits.py", "mathieu_and_fluxonium.py", "matrix_elements.py", "parameter_box.py"])
+        self.assertEqual(scripts, ["from_scqubits.py", "mathieu_and_fluxonium.py", "matrix_elements.py", "parameter_box.py",
+                                   "regression_assert.py"])
 
 
 if __name__ == "__main__":
