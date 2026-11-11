@@ -86,3 +86,31 @@ arXiv:2607.04247, 2026). This repository applies known methods to the rotor in t
 the truncation (searched: scqubits and CircuitQ, documentation and papers; SQcircuit, QuTiP and Qiskit Metal only by
 web search, without reading their code). Not consulted (paywall): Volkmer 2004, Nagatou 2008, Shivakumar 1987,
 Weinstein–Stenger 1972.
+
+## The same argument on the sphere and for the molecule (0.2.0)
+
+`rotore_sferico_garantito` (H = B N(N+1) − D_c [N(N+1)]² − dE cos θ, fixed M) and `molecola_iperfine_garantita`
+(rotation, hyperfine, Zeeman and Stark terms, one M_F sector) use the three steps above with a different lattice:
+
+- **Upper bound.** H_L is the compression of H to the states with N ≤ L: λ_j(H) ≤ λ_j(H_L) (Rayleigh–Ritz, Teschl
+  Theorem 4.12(i)); the sector M_F is an invariant subspace when the fields are along z, so the argument is applied
+  there.
+- **Lower bound.** Only cos θ (ΔN = 1) and the rank-2 terms (quadrupoles and tensor spin–spin, ΔN = 2) couple the
+  inner block A (N ≤ L) to the outer block C (N ≥ L + 1); the coupling V is a finite matrix built in Arb. For any
+  η > 0, 2⟨x, Vy⟩ ≥ −η‖P_B x‖² − ‖V‖²‖y‖²/η with P_B the projector on the rows of A that V touches, so
+  H ≥ (A − ηP_B) ⊕ (C − ‖V‖²/η) as forms, with ‖V‖₂ ≤ √(‖V‖₁‖V‖_∞). The outer block is bounded below by
+  g(L+1) = B(L+1)(L+2) − D[(L+1)(L+2)]² − (block norms of the terms diagonal in N: Zeeman, spin–rotation, scalar
+  spin–spin) − (K_T + K_Q) − dE, where K_T + K_Q bounds the norm of the rank-2 terms on the whole space (sum of the
+  norms of the spin components, sup|C²_q| ≤ 1) and dE the Stark term (sup|C¹₀| ≤ 1): a compression does not increase
+  a norm, so C ≥ (diagonal blocks) − ‖R‖ − ‖S‖. That g is increasing from L + 1 on is checked with exact increments in
+  rational arithmetic (with D_c > 0 the model is defined on N ≤ N_fis, where the diagonal still grows; declared). If
+  t = g(L+1) − ‖V‖²/η exceeds the upper bound of λ_j(H), then λ_j(H) ≥ λ_j(A − ηP_B) (Teschl Corollary 4.11).
+- **Counts.** "How many eigenvalues below x" by LDLᵀ in Arb balls on the tridiagonal (sphere) or banded (molecule)
+  matrix; an uncertain pivot raises the precision or moves the point, never counts.
+
+Measured controls (2026-11-10/11, in the author's repository, not re-run here): the intervals contain the numpy
+reference at a much larger truncation in every case tried (sphere: 177 of 177 cuts; molecule: 0 violations on 197
+random and extreme cases by an independent reviewer, while the mutant with the wrong sign of η gives 50 violations);
+RbCs with the constants of Gregory et al. 2016 reproduces their 16 hyperfine transitions within 100 Hz with intervals
+7 mHz wide; TlF with the constants of CeNTREX-TlF 0.4.0 agrees with their code within 0.5 Hz at zero field and at
+173 V/cm.

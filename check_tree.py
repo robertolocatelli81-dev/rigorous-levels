@@ -29,7 +29,9 @@ import tempfile
 
 ELENCO = "FILE_LIST.tsv"
 KINDS = ("copy", "derived", "new")
-TERZE_PARTI = {"numpy", "scipy", "flint", "mpmath", "scqubits"}
+TERZE_PARTI = {"numpy", "scipy", "flint", "mpmath", "scqubits", "sympy",
+               # porte opzionali della multiporta (importate solo dentro la sandbox, nel runner):
+               "diatomic", "SQcircuit", "pyEPR", "centrex_tlf", "transmon_charge_basis", "transmon_CPB_analytic"}
 # modules absent from the repository, imported only inside a try that treats their absence as an error (failed, not skipped)
 ASSENTI_DICHIARATI = set()
 RADICE_PACCHETTO = "qraft_ra"

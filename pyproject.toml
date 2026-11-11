@@ -5,16 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "qraft-ra"
 dynamic = ["version"]
-description = "Guaranteed eigenvalue intervals for the charge-basis rotor (transmon, cos 2φ), a float solver with a declared error, and a convergence warning for scqubits"
+description = "Guaranteed eigenvalue intervals for the charge-basis rotor (transmon, cos mφ), the spherical rotor and the 1Σ molecule (hyperfine, Zeeman, Stark), a convergence warning for scqubits, a sandboxed multiport for external solvers, and the guaranteed error of the Duffing model"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Roberto Locatelli" }]
-dependencies = ["numpy>=1.26", "scipy>=1.11", "python-flint>=0.9.0"]
+dependencies = ["numpy>=1.26", "scipy>=1.11", "python-flint>=0.9.0", "sympy>=1.12"]
 
 [project.optional-dependencies]
 scqubits = ["scqubits>=4.3.1"]
+porte = ["scqubits>=4.3.1", "diatomic-py>=2.1.0", "SQcircuit>=1.0.0", "pyEPR-quantum>=1.0.2", "centrex-tlf>=0.4.0"]
 test = ["mpmath>=1.3.0"]
 
 [tool.setuptools]

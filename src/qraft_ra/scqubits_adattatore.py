@@ -1,29 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra.scqubits_adattatore — scqubits as an optional engine, with the convergence warning scqubits does not give.
+"""qraft_ra/scqubits_adattatore.py — scqubits come motore opzionale, con l'avviso di convergenza che scqubits non dà.
 
-scqubits (BSD-3, https://scqubits.readthedocs.io) diagonalizes the transmon in a charge basis truncated at the `ncut`
-chosen by the user; its documentation leaves the convergence check to the user. With ncut=30 it is wrong without
-saying so on 65 of the 200 benchmark cases, all at E_J/E_C ≥ 7744 (README, "Measurements"). Here:
+scqubits (BSD-3, https://scqubits.readthedocs.io) diagonalizza il transmon su una base di carica troncata a `ncut`
+scelto dall'utente; la sua documentazione lascia all'utente il controllo della convergenza. Con ncut=30 sbaglia
+senza dirlo oltre E_J/E_C ≈ 7700 (ESITO 07/11). Qui:
 
-  - `disponibile()`: lazy import; if scqubits is missing it says so, and every computation raises `ScqubitsAssente`
-    with the reason.
+  - `disponibile()`: import pigro; se scqubits manca lo dice, e ogni calcolo solleva `ScqubitsAssente` col motivo.
   - `spettro_scqubits(r, k, ncut, controllo=...)`:
-      controllo="nessuno"   the scqubits number as it is (state NON_CONTROLLATO, error None);
-      controllo="raddoppio" also computes at 2·ncut; estimated error = max_j |E_j(ncut) − E_j(2·ncut)|; state
-                            NON_CONVERGENTE if it exceeds the threshold. The energies returned are those at ncut;
-      controllo="auto"      doubles ncut until the shift is ≤ tol (or NCUT_LIMITE: NON_CONVERGENTE).
-    The default threshold is relative: 1e-6 · max(1, largest transition); `tol` in GHz replaces it.
-  - `confronta(r, k)`: cross-check against our solver (`rotore_spettro.spettro`), difference on the transitions
-    E_j − E_0.
+      controllo="nessuno"   il numero di scqubits così com'è (stato NON_CONTROLLATO, errore None);
+      controllo="raddoppio" calcola anche a 2·ncut; errore stimato = max_j |E_j(ncut) − E_j(2·ncut)|; stato
+                            NON_CONVERGENTE se supera la soglia. Le energie restituite sono quelle a ncut;
+      controllo="auto"      raddoppia ncut finché lo spostamento è ≤ tol (o NCUT_LIMITE: NON_CONVERGENTE).
+    Soglia predefinita, regola "soglia-scq/1.0" (gtm/qraft_soglia_20261111/SPECIFICA_SOGLIA_v1.0.md, scritta prima
+    del codice l'11/11/2026): unità DICHIARATA (`unita` ∈ GHz/MHz/Hz, lista chiusa; la regola è covariante);
+    fisica = min(1e-6 GHz, 1e-6·(E[k−1]−E[0])) con E a 2·ncut; pavimento = 32·eps·(‖H(ncut)‖₂+‖H(2ncut)‖₂) con
+    ‖H(n)‖₂ ≤ 4E_C(n+|n_g|)²+E_J (Gershgorin); soglia = max(pavimento, fisica o `tol`); l'origine del max è nel
+    campo `soglia_origine` (assoluta/relativa/utente/pavimento); se decide il pavimento lo stato è OK_LIMITE_FLOAT.
+    Regola vecchia (relativa 1e-6·max(1, transizione massima), unità nascoste nel max): tolta.
+  - `motore="processo"` importa scqubits NEL processo (codice altrui non fidato, dichiarato); `motore="sandbox"`
+    esegue la porta `scqubits_transmon` di qraft_ra/multiporta.py dentro bwrap (fail-closed: senza bwrap nessun numero).
+  - `confronta(r, k)`: controllo incrociato col nostro solutore (`rotore_spettro.spettro`), scarto sulle
+    transizioni E_j − E_0.
 
-Why doubling gives no false alarms: the charge bases are nested, so (Cauchy, Rayleigh–Ritz)
-E_j(ncut) ≥ E_j(2·ncut) ≥ true E_j. The shift on doubling is a LOWER bound of the true error: if it exceeds the
-threshold, the true error exceeds it, provided the scale of the threshold (transitions at 2·ncut) is the true one,
-that is, provided 2·ncut is enough. The opposite (large true error, small shift) is not excluded by the mathematics:
-it is only measured on the benchmark. Within ±1e-4 relative of the threshold, misses and false alarms exist.
+Perché il raddoppio non dà falsi allarmi: le basi di carica sono annidate, quindi (Cauchy, Rayleigh–Ritz)
+E_j(ncut) ≥ E_j(2·ncut) ≥ E_j vero. Lo spostamento al raddoppio è un limite INFERIORE dell'errore vero: se supera
+la soglia, l'errore vero la supera, a patto che la scala della soglia (transizioni a 2·ncut) sia quella vera, cioè
+che 2·ncut basti. Il contrario (errore vero grande con spostamento piccolo) non è escluso dalla matematica: è
+misurato nel banco (Q2); al confine, entro ±1e-4 relativo dalla soglia, mancati e falsi allarmi esistono (NEMESIS
+08/11).
 
-Domain: only the transmon U = −E_J cos φ with E_J > 0 (`scqubits.Transmon`). Any other `Rotore` = refusal.
+Dominio: solo il transmon U = −E_J cos φ con E_J > 0 (`scqubits.Transmon`). Qualunque altro `Rotore` = rifiuto.
 """
 from __future__ import annotations
 
@@ -34,21 +41,29 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 
 from qraft_ra.rotore_spettro import (NON_CONVERGENTE, OK, IngressoRifiutato, Rotore, _reale_finito,
-                                     spettro as _spettro_nostro)
+                                  spettro as _spettro_nostro)
 
 NON_CONTROLLATO = "NON_CONTROLLATO"
+OK_LIMITE_FLOAT = "OK_LIMITE_FLOAT"
 CONTROLLI = ("nessuno", "raddoppio", "auto")
+MOTORI = ("processo", "sandbox")
+UNITA = {"GHz": 1.0, "MHz": 1e3, "Hz": 1e9}      # fattore GHz → unità dichiarata
 NCUT_LIMITE = 1920
-SOGLIA_RELATIVA = 1e-6
+REGOLA = "soglia-scq/1.0"
+TOL_ASS_GHZ = 1e-6
+TOL_REL = 1e-6
+FATTORE_PAVIMENTO = 32
+EPS = 2.0 ** -52
+ORIGINI = ("assoluta", "relativa", "utente", "pavimento")
 
 
 class ScqubitsAssente(RuntimeError):
-    """scqubits is not installed: no number, only the reason."""
+    """scqubits non è installato: nessun numero, solo il motivo."""
 
 
 def _importa():
     try:
-        import scqubits as sq            # lazy import: optional dependency
+        import scqubits as sq            # import pigro: dipendenza opzionale
     except ImportError as e:
         raise ScqubitsAssente(f"scqubits non installato ({e}); installare scqubits==4.3.1 oppure usare "
                               f"qraft_ra.rotore_spettro.spettro") from None
@@ -67,11 +82,15 @@ def disponibile() -> Dict:
 @dataclass(frozen=True)
 class SpettroScq:
     energie: Tuple[float, ...]
-    errore: Optional[float]        # estimated error (lower bound of the true error); None if not checked
+    errore: Optional[float]        # errore stimato (limite inferiore dell'errore vero); None se non controllato
     soglia: Optional[float]
     ncut: int
     stato: str
     motore: str
+    soglia_origine: Optional[str] = None   # assoluta | relativa | utente | pavimento (None se non controllato)
+    pavimento: Optional[float] = None      # 32·eps·(‖H(ncut)‖₂ + ‖H(2ncut)‖₂), unità dichiarata
+    unita: str = "GHz"
+    regola: str = REGOLA
 
 
 def _transmon(r: Rotore) -> Tuple[float, float, float]:
@@ -94,18 +113,69 @@ def _autovalori(sq, ec: float, ej: float, ng: float, ncut: int, k: int) -> np.nd
     return np.asarray(t.eigenvals(evals_count=k), dtype=float)
 
 
-def _soglia(E: np.ndarray, tol: Optional[float]) -> float:
+def _autovalori_sandbox(ec: float, ej: float, ng: float, ncut: int, k: int, unita: str, secondi: int) -> Tuple[np.ndarray, str]:
+    """La porta scqubits_transmon della multiporta, dentro bwrap. Nessun numero se la sandbox o scqubits mancano."""
+    from qraft_ra import multiporta as MP
+    import site
+    import sysconfig
+    sp = tuple(p for p in (sysconfig.get_path("purelib"), site.getusersitepackages()) if p and __import__("os").path.isdir(p))
+    r = MP.Richiesta("scqubits_transmon", {"tipo": "rotore_cos", "E_C": ec, "E_J": ej, "n_g": ng}, k, {"ncut": ncut},
+                     unita=unita, secondi=secondi, mem_mib=4096, site_packages=sp)
+    u = MP.esegui_porta(r)
+    if u.stato != "OK":
+        raise ScqubitsAssente(f"porta scqubits_transmon: {u.stato}: {u.motivo}")
+    if u.unita != unita or len(u.livelli) != k:      # contratto chiuso: unità e numero di livelli quelli chiesti (NEMESIS 11/11)
+        raise ScqubitsAssente(f"porta scqubits_transmon: unità {u.unita!r}/{len(u.livelli)} livelli ≠ {unita!r}/{k}")
+    return np.asarray(u.livelli, dtype=float), u.versione_solutore
+
+
+def norma_H(ec: float, ej: float, ng: float, ncut: int) -> float:
+    """Limite superiore di ‖H(ncut)‖₂ (Gershgorin sulla tridiagonale simmetrica): 4E_C(ncut+|n_g|)² + E_J."""
+    return 4.0 * ec * (ncut + abs(ng)) ** 2 + ej
+
+
+def soglia_regola(E2: np.ndarray, ec: float, ej: float, ng: float, ncut: int, tol: Optional[float],
+                  unita: str) -> Tuple[float, str, float]:
+    """(soglia, origine, pavimento) secondo "soglia-scq/1.0". E2 = energie a 2·ncut nell'unità dichiarata."""
+    u = UNITA[unita]
+    pav = FATTORE_PAVIMENTO * EPS * (norma_H(ec, ej, ng, ncut) + norma_H(ec, ej, ng, 2 * ncut))
     if tol is not None:
-        return tol
-    return SOGLIA_RELATIVA * max(1.0, float(np.max(np.diff(E))) if len(E) > 1 else 1.0)
+        fisica, origine = tol, "utente"
+    else:
+        ass = TOL_ASS_GHZ * u
+        if len(E2) > 1:
+            rel = TOL_REL * float(E2[-1] - E2[0])
+            fisica, origine = (rel, "relativa") if rel < ass else (ass, "assoluta")
+        else:
+            fisica, origine = ass, "assoluta"
+    if pav > fisica:
+        return pav, "pavimento", pav
+    return fisica, origine, pav
+
+
+def _verdetto(E: np.ndarray, E2: np.ndarray, ec, ej, ng, ncut, tol, unita, motore_str):
+    err = float(np.max(np.abs(E - E2)))
+    s, origine, pav = soglia_regola(E2, ec, ej, ng, ncut, tol, unita)
+    if err > s:
+        stato = NON_CONVERGENTE
+    else:
+        stato = OK_LIMITE_FLOAT if origine == "pavimento" else OK
+    return err, s, origine, pav, stato
 
 
 def spettro_scqubits(r: Rotore, k: int = 6, ncut: int = 30, *, controllo: str = "raddoppio",
-                     tol: Optional[float] = None) -> SpettroScq:
+                     tol: Optional[float] = None, unita: str = "GHz", motore: str = "processo",
+                     secondi: int = 120) -> SpettroScq:
+    """Spettro del transmon via scqubits con l'avviso di convergenza (regola "soglia-scq/1.0"). Ingressi chiusi."""
     k = _intero(k, "k", 1)
     ncut = _intero(ncut, "ncut", 1)
     if controllo not in CONTROLLI:
         raise IngressoRifiutato(f"controllo {controllo!r} sconosciuto: ammessi {CONTROLLI}")
+    if not isinstance(unita, str) or unita not in UNITA:
+        raise IngressoRifiutato(f"unita {unita!r} sconosciuta: ammesse {tuple(UNITA)}")
+    if motore not in MOTORI:
+        raise IngressoRifiutato(f"motore {motore!r} sconosciuto: ammessi {MOTORI}")
+    secondi = _intero(secondi, "secondi", 1)
     if tol is not None:
         tol = _reale_finito(tol, "tol")
         if tol <= 0:
@@ -113,37 +183,50 @@ def spettro_scqubits(r: Rotore, k: int = 6, ncut: int = 30, *, controllo: str = 
     if 2 * ncut + 1 < k:
         raise IngressoRifiutato(f"ncut={ncut} dà {2 * ncut + 1} stati, meno dei k={k} richiesti")
     ec, ej, ng = _transmon(r)
-    sq = _importa()
-    motore = f"scqubits {sq.__version__}"
-    E = _autovalori(sq, ec, ej, ng, ncut, k)
+    if motore == "processo":
+        sq = _importa()
+        motore_str = f"scqubits {sq.__version__} (processo)"
+
+        def calcola(n):
+            return _autovalori(sq, ec, ej, ng, n, k)
+    else:
+        versione = {}
+
+        def calcola(n):
+            E, v = _autovalori_sandbox(ec, ej, ng, n, k, unita, secondi)
+            versione["v"] = v
+            return E
+        motore_str = None
+    E = calcola(ncut)
+    if motore_str is None:
+        motore_str = f"{versione['v']} (sandbox bwrap)"
     if controllo == "nessuno":
-        return SpettroScq(tuple(float(e) for e in E), None, None, ncut, NON_CONTROLLATO, motore)
+        return SpettroScq(tuple(float(e) for e in E), None, None, ncut, NON_CONTROLLATO, motore_str, None, None, unita)
     if controllo == "raddoppio":
-        E2 = _autovalori(sq, ec, ej, ng, 2 * ncut, k)
-        err = float(np.max(np.abs(E - E2)))
-        s = _soglia(E2, tol)
-        return SpettroScq(tuple(float(e) for e in E), err, s, ncut, OK if err <= s else NON_CONVERGENTE, motore)
+        E2 = calcola(2 * ncut)
+        err, s, origine, pav, stato = _verdetto(E, E2, ec, ej, ng, ncut, tol, unita, motore_str)
+        return SpettroScq(tuple(float(e) for e in E), err, s, ncut, stato, motore_str, origine, pav, unita)
     while True:                                   # auto
         if 2 * ncut > NCUT_LIMITE:
-            return SpettroScq(tuple(float(e) for e in E), math.inf, _soglia(E, tol), ncut, NON_CONVERGENTE, motore)
-        E2 = _autovalori(sq, ec, ej, ng, 2 * ncut, k)
-        err = float(np.max(np.abs(E - E2)))
+            s, origine, pav = soglia_regola(E, ec, ej, ng, ncut, tol, unita)
+            return SpettroScq(tuple(float(e) for e in E), math.inf, s, ncut, NON_CONVERGENTE, motore_str, origine, pav, unita)
+        E2 = calcola(2 * ncut)
+        err, s, origine, pav, stato = _verdetto(E, E2, ec, ej, ng, ncut, tol, unita, motore_str)
         ncut, E = 2 * ncut, E2
-        s = _soglia(E, tol)
-        if err <= s:
-            return SpettroScq(tuple(float(e) for e in E), err, s, ncut, OK, motore)
+        if stato != NON_CONVERGENTE:
+            return SpettroScq(tuple(float(e) for e in E), err, s, ncut, stato, motore_str, origine, pav, unita)
 
 
 def confronta(r: Rotore, k: int = 6, *, tol_nostro: float = 1e-11, tol_scq: float = 1e-10) -> Dict:
-    """Cross-check: scqubits (auto) against our solver. Difference on the transitions E_j − E_0 and on the
-    absolute energies, in GHz. If one of the two does not converge, it says so and gives no difference."""
+    """Controllo incrociato: scqubits (auto) contro il nostro solutore. Scarto sulle transizioni E_j − E_0 e sulle
+    energie assolute, in GHz. Se uno dei due non converge, lo dice e non dà lo scarto."""
     a = spettro_scqubits(r, k, controllo="auto", tol=tol_scq)
     b = _spettro_nostro(r, k, tol_nostro)
-    if a.stato != OK or b.stato != OK:
-        return {"stato": NON_CONVERGENTE, "scqubits": a.stato, "nostro": b.stato,
+    if a.stato not in (OK, OK_LIMITE_FLOAT) or b.stato != OK:
+        return {"stato": NON_CONVERGENTE, "scqubits": a.stato, "nostro": b.stato, "soglia_origine": a.soglia_origine,
                 "scarto_transizioni": None, "scarto_assoluto": None}
     ea, eb = np.array(a.energie), np.array(b.energie)
-    return {"stato": OK, "scqubits": a.stato, "nostro": b.stato,
+    return {"stato": OK, "scqubits": a.stato, "nostro": b.stato, "soglia_origine": a.soglia_origine,
             "scarto_transizioni": float(np.max(np.abs((ea - ea[0]) - (eb - eb[0])))),
             "scarto_assoluto": float(np.max(np.abs(ea - eb))), "ncut": a.ncut, "nmax": b.nmax,
             "motore": a.motore}

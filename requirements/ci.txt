@@ -6,3 +6,4 @@ scipy==1.18.1
 python-flint==0.9.0
 mpmath==1.3.0
 scqubits==4.3.1
+sympy==1.14.0

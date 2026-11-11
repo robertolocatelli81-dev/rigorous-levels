@@ -1,73 +1,86 @@
 # qraft-ra
 
-Mathematically guaranteed eigenvalue intervals for the charge-basis rotor (transmon, cos 2φ qubits, any sum of
-cosines up to cos 24φ), and a convergence warning for scqubits.
+Mathematically guaranteed eigenvalue intervals for the charge-basis rotor (transmon, cos 2φ, any sum of cosines up to
+cos 24φ), for the spherical rotor in a field and for the ¹Σ molecule with hyperfine, Zeeman and Stark terms; a
+convergence warning for scqubits with a declared threshold rule; a sandboxed multiport that runs other people's
+solvers and tells, level by level, whether they fall inside the intervals; and the guaranteed per-level error of the
+Duffing model against the transmon.
 
 Noûs, AI agent under a revocable mandate from Roberto Locatelli.
 
 ## The problem, and for whom
 
-Spectra of superconducting circuits are computed in a truncated charge basis. A fixed truncation (scqubits' `ncut`,
-or `nmax` in a hand-written code) cannot notice when it is too small: the number comes out, wrong, with no warning.
-scqubits leaves the convergence check to the user (documentation, "Bases, truncation, and convergence").
+Spectra of superconducting circuits and of polar molecules are computed in a truncated basis (charge states `ncut`,
+rotational states `Nmax`/`Jmax`, Fock states). A fixed truncation cannot notice when it is too small: the number comes
+out, wrong, with no warning. scqubits, diatomic-py, CeNTREX-TlF, qiskit-metal's `Hcpb`, SQcircuit and pyEPR all leave
+the truncation to the user. This package is for people who need to know how far a computed level can be trusted:
+when a value goes into a paper, a fit, a design review or a regression test.
 
-This package is for people who need to know how far a computed level can be trusted: when a value goes into a paper,
-a fit, a design review or a regression test, or when a parameter sweep reaches regimes (large E_J/E_C, many
-harmonics) where the usual truncation rule was never checked.
+It gives, in `src/qraft_ra`:
 
-It gives three things:
-
-1. **`intervallo_garantito.livelli_garantiti`**: the first k levels of
-   H = 4E_C(n − n_g)² + Σ_m c_m cos(mφ) as intervals [low, high] that contain the exact eigenvalue of this H,
-   with a proof that includes the truncation of the basis (`docs/PROOF.md`). When the proof does not apply, it
-   raises `FuoriDominio` with the reason and returns no number.
-2. **`rotore_spettro.spettro`**: float64 levels of the same H (sines allowed) whose basis grows until the low
-   spectrum stops moving, checked by a second method; otherwise the state is `NON_CONVERGENTE`.
-3. **`scqubits_adattatore.spettro_scqubits`**: scqubits' own transmon, called at `ncut` and at `2·ncut`; if the
-   shift exceeds a threshold, the state is `NON_CONVERGENTE` (mode `raddoppio`), or `ncut` keeps doubling until it
-   does not (mode `auto`).
+1. **Guaranteed intervals** (`intervallo_garantito`, `rotore_sferico_garantito`, `molecola_iperfine_garantita`):
+   the first k levels as intervals [low, high] that contain the exact eigenvalue of the written H, with a proof that
+   includes the truncation of the basis (`docs/PROOF.md`). When the proof does not apply, `FuoriDominio` with the reason
+   and no number.
+2. **A float solver with a declared error** (`rotore_spettro`) and **the scqubits convergence warning**
+   (`scqubits_adattatore`): scqubits' transmon at `ncut` and `2·ncut`; the threshold rule "soglia-scq/1.0" (declared
+   unit, absolute 1e-6 GHz, relative 1e-6, float floor) reports which of its three parts decided (`soglia_origine`).
+3. **The multiport** (`multiporta`, `porte_runner`): an external solver runs inside a bubblewrap sandbox (no network,
+   read-only system, tmpfs HOME, rlimits, minimal environment), its JSON output is validated against a closed schema,
+   and each level is compared with the intervals in exact arithmetic: `DENTRO`, `DENTRO_TOLLERANZA` (within a float
+   tolerance you declare), `FUORI` (with the distance) or `NON_CONFRONTABILE` (with the reason). Without bubblewrap
+   nothing runs: no silent fallback. Ports: scqubits, diatomic-py, qiskit-metal (`Hcpb`, `mathieu_level`), SQcircuit,
+   pyEPR, CeNTREX-TlF.
+4. **Duffing against transmon** (`duffing_vs_transmon`): the guaranteed interval of (E_j − E_0) − E^D_j for each
+   level, with ω and α taken from the first three guaranteed levels or from Koch et al. 2007 first order.
 
 Identifiers, states and error messages are in Italian (`Rotore`, `spettro`, `GARANTITO`, `FuoriDominio`, ...), as in
-the code the package was extracted from.
+the code the package was extracted from; the docstrings of the modules added in 0.2.0 are in Italian too (translation
+pending).
 
 ## What is guaranteed, and under which conditions
 
-For j < k, λ_j(H_N′) ≤ λ_j(H) ≤ λ_j(H_N): Rayleigh–Ritz above, a block decoupling of the quadratic form with a
-proven bound on the truncated part below, eigenvalue counts by Sylvester's law of inertia in Arb ball arithmetic
-(python-flint). The argument and its sources (Teschl; Barth, Martin, Wilkinson 1967; Johansson 2017) are in
-`docs/PROOF.md`. The guarantee holds under three conditions:
+For j < k, λ_j(H_N′) ≤ λ_j(H) ≤ λ_j(H_N): Rayleigh–Ritz above, a block decoupling of the quadratic form with a proven
+bound on the truncated part below (Young's inequality on the coupling, Gershgorin or operator norms on the outer
+block), eigenvalue counts by Sylvester's law of inertia in Arb ball arithmetic (python-flint). The argument and its
+sources (Teschl; Barth, Martin, Wilkinson 1967; Johansson 2017) are in `docs/PROOF.md`. The guarantee holds under
+three conditions:
 
-1. E_C > 0 and distinct integer harmonics 1 ≤ m ≤ 24, cosines only (`Rotore` checks them; sines are refused).
+1. The inputs are in the declared domain (each constructor checks them; anything else is `FuoriDominio` with the
+   reason: unknown input is never accepted silently).
 2. H is the one of the exact float64 parameters (0.1 is 0.1000000000000000055…).
-3. Arb/FLINT rounds correctly. This is assumed, not proven here, and there is no formal verification of this code:
-   tests and mutation testing reduce the risk of a defect in the implementation, they do not remove it.
+3. Arb/FLINT rounds correctly, and sympy's 3j symbols are exact. This is assumed, not proven here, and there is no
+   formal verification of this code: tests and mutation testing reduce the risk of a defect, they do not remove it.
 
-Within these conditions an interval marked `GARANTITO` has width ≤ the requested one (default 1e-12, in the unit of
-E_C); `LARGO` means valid but wider than requested. Limits: k ≤ 20 levels, bases up to dimension 8001.
+Within these conditions an interval marked `GARANTITO` has width ≤ the requested one (default 1e-12 relative);
+`LARGO` means valid but wider than requested (the molecule keeps trying larger truncations while the width halves).
 
 ## What it does not do
 
-- It does not say that H describes a device. The interval contains the value of the H you wrote, not of a chip.
-- It is not faster than scqubits. A guaranteed point costs 0.16 s (median) to 3.8 s (6 levels); our float solver is
-  about 11 times slower than scqubits in the device regime with one BLAS thread, about 40 times with 8 threads
-  (measurements below). Fine for checking values, not for sweeps.
-- It does not improve accuracy in the device regime: there scqubits and our solver agree within 2.3e-12 GHz.
+- It does not say that H describes a device or a molecule. The interval contains the value of the H you wrote.
+- The multiport does not judge the physics of the other solver: it says inside/outside our intervals, with the reason.
+  bubblewrap is a user-namespace sandbox, not a virtual machine (no seccomp, no `--disable-userns`); the environment
+  passed to bwrap itself is minimal (a reviewer found the session environment readable in `/proc/1/environ` before
+  0.2.0: fixed and tested).
 - The convergence warning is an empirical check, not a proof: the shift on doubling is a lower bound of the true
-  error, and misses and false alarms exist within ±1e-4 relative of the threshold (reported on 2026-11-08). Its
-  default threshold is relative: see "Limits" before using it on device parameters.
-- The scqubits adapter covers only the transmon (`scqubits.Transmon`); the kite and multi-harmonic rotors stay on
-  our own solver.
+  error. With the rule "soglia-scq/1.0" no result marked `OK` was outside its own threshold in 2000 + 1200 runs in the
+  device regime and 1080 runs outside it (independent reviewer); the float floor (factor 32) is about 100 times above
+  the measured noise on converged pairs, declared.
+- It is not faster than scqubits (a guaranteed point costs 0.16 s median to a few seconds; a molecule sector up to
+  ~500 states costs seconds per count); the multiport costs ~3.6 s per run (import of scqubits inside bwrap).
 - QRAFT-RA is an internal model of its author, not an external validator. Nothing here is an accredited or
   third-party certification: "guaranteed" means "follows from the proof in `docs/PROOF.md`", nothing more.
 
 ## Install and use
 
 ```sh
-pip install .                  # numpy, scipy, python-flint
+pip install .                  # numpy, scipy, python-flint, sympy
 pip install ".[scqubits]"      # also the scqubits adapter
+pip install ".[porte]"         # scqubits, diatomic-py, SQcircuit, pyEPR-quantum, centrex-tlf (ports of the multiport)
 ```
 
-Python ≥ 3.10. Not on PyPI yet.
+Python 3.10–3.14 (python-flint 0.9.0 has wheels for these). bubblewrap (`bwrap`) is needed only by the multiport.
+Not on PyPI.
 
 ```python
 from qraft_ra.intervallo_garantito import livelli_garantiti
@@ -94,75 +107,131 @@ OK True
 NON_CONVERGENTE
 ```
 
+More (shown as text, each one is exercised by the tests):
+
+```text
+# spherical rotor: RbCs, B = 490.173994 MHz, d·E at 1.2 V/cm, M = ±1
+from qraft_ra.rotore_sferico_garantito import RotoreSferico, livelli_sfera_garantiti, transizione
+iv0 = livelli_sfera_garantiti(RotoreSferico(B=490.173994, dE=1.225 * 0.503412 * 1.2, M=0), 2)
+iv1 = livelli_sfera_garantiti(RotoreSferico(B=490.173994, dE=1.225 * 0.503412 * 1.2, M=1), 1)
+print(transizione(iv0, 0, iv1, 0))               # N = 0 -> N = 1, M = 1, in MHz, as exact Fractions
+
+# molecule: RbCs with the constants of Gregory et al. 2016, sector M_F = +6, level N = 1
+from qraft_ra.molecola_iperfine_garantita import MolecolaSigma, livelli_molecola_garantiti, zeeman_hz
+m = MolecolaSigma(3, 7, B=490173.994e3, D=213.0, c1=29.4, c2=196.8, c3=192.4, c4=19.019e3,
+                  eQq1=-809.29e3, eQq2=59.98e3, z_N=zeeman_hz(0.0062, 181.541),
+                  z1=zeeman_hz(1.8295, 181.541), z2=zeeman_hz(0.7331, 181.541))     # Hz
+iv6 = livelli_molecola_garantiti(m, 12, 1, larghezza=1e-11)       # 2M_F = 12
+
+# multiport: scqubits in a sandbox, compared with the intervals
+from qraft_ra import multiporta as MP
+r = MP.Richiesta("scqubits_transmon", {"tipo": "rotore_cos", "E_C": 0.3, "E_J": 15.0, "n_g": 0.25}, 6,
+                 {"ncut": 30}, site_packages=(<site-packages with scqubits>,))
+u = MP.esegui_porta(r)                           # SandboxAssente without bwrap
+print(MP.confronta(iv, "GHz", u, tolleranza=1e-12).complessivo)   # DENTRO / DENTRO_TOLLERANZA / FUORI
+
+# Duffing against transmon
+from qraft_ra.duffing_vs_transmon import errore_duffing
+print(errore_duffing(0.3, 15.0, 0.25, 6).delta_float()[3])        # interval of (E_3 - E_0) - E^D_3, GHz
+```
+
+## Three public reports, reproducible with this package
+
+Each one was found by comparing a public solver with the guaranteed intervals and reported by the author on
+2026-11-11 (links are public; nothing else was sent):
+
+1. **durham-qlm/diatomic-py #15** — https://github.com/durham-qlm/diatomic-py/issues/15. The code of
+   `tensor_nuclear` (2.1.0) uses +√6 c₃ T²(C)·T²(I₁,I₂); the package's paper (eq. 5b), Aldegunde et al. 2008 and
+   Gregory et al. 2016 use the opposite sign. With the paper's sign the 16 measured RbCs transitions of Gregory et al.
+   2016 (Table I) are reproduced within 100 Hz (intervals 7 mHz wide); with the code's sign 1 of 16. Reproduce:
+   `tests/test_molecola_iperfine_garantita.py::TestGregory2016` and `TestCostruzioneContraDiatomicPy` (needs
+   `pip install diatomic-py==2.1.0`).
+2. **qiskit-community/qiskit-metal #1252** — https://github.com/qiskit-community/qiskit-metal/issues/1252.
+   `mathieu_level(m, ng, Ej, Ec)` returns the energy of another level for some (m, Ej/Ec) at n_g = 0 and 1/2: the
+   cause is `scipy.special.mathieu_a/mathieu_b` (522 wrong values on m ≤ 12, |q| ≤ 400 with scipy ≤ 1.18.1; fixed on
+   scipy main by PR #25128, milestone 2.0.0). Reproduce with the port `metal_mathieu` (mount their
+   `transmon_CPB_analytic.py` and `transmon_charge_basis.py` in a folder named `site-packages/`): case E_C = 0.16792,
+   E_J = 7.01912 GHz, n_g = 0.5, m = 5 → 2.52391 GHz (the value of m = 3), while the guaranteed interval is
+   [6.277382…]; `Hcpb(nlevels=15)` on the same cases is inside the intervals except 7 of 50 at E_J/E_C ≥ 285 (≤ 2.9 kHz).
+3. **scqubits/scqubits #334** (comment) — https://github.com/scqubits/scqubits/issues/334#issuecomment-6796563509.
+   The first scipy release whose sparse `eigsh` silently omits the zero eigenvalue is 1.15.0 (bisection 1.10.1,
+   1.13.1, 1.14.1 right; 1.15.0, 1.15.3, 1.16.2, 1.17.1, 1.18.1 wrong; independent of the start vector). This is a
+   scipy sparse defect, not a truncation one: scqubits' dense transmon (`eigvalsh_tridiagonal`) is unaffected, and
+   the port `scqubits_transmon` falls inside the intervals (0 of 200 outside at ncut = 30 in the device regime).
+
+Two more measurements with no report (the other side already documents or fixed them): CeNTREX-TlF's default
+`Jmax = J + 2` errs by 4.26 MHz at 10 kV/cm and 3.9 GHz at 30 kV/cm with no warning (their AGENTS.md already tells
+users to raise Jmax); SQcircuit 1.0.0's single transmon is inside the intervals within 3e-13 GHz once the junction's
+own capacitance (1e-20 F) is included (issue #5 there expected the first-order anharmonicity −E_C, the exact one at
+E_J/E_C = 26 is −0.466 GHz).
+
 ## Measurements
 
-**Measured on 2026-11-10** on the author's machine (x86-64 Linux, 8 cores; Python 3.11.2, numpy 2.4.6, scipy 1.17.1,
-python-flint 0.9.0, scqubits 4.3.1, mpmath 1.3.0) with `bench/readme_numbers.py --full`, which anyone can rerun (fixed
-seeds, the same case generators as the author's benchmarks of 2026-11-08). Times depend on the machine and its load.
+**Measured on 2026-11-10** (charge-basis rotor, `bench/readme_numbers.py --full`, Python 3.11.2, numpy 2.4.6, scipy
+1.17.1, python-flint 0.9.0, scqubits 4.3.1): 400 of 400 cases `GARANTITO`, the 50-digit mpmath reference inside the
+interval in 2400 of 2400 levels, largest width 1.56e-13 GHz; time per guaranteed point (6 levels) mean 0.51 s, median
+0.16 s; scqubits at ncut = 30 wrong without a warning in 65 of 200 cases at E_J/E_C ≥ 7744, all 65 flagged by the
+adapter, 0 false alarms.
+
+**Measured on 2026-11-10/11** in the author's repository with the modules of 0.2.0 (logs there, not re-run here):
 
 | What | Result |
 |---|---|
-| Guaranteed intervals, 400 cases (200 transmons −E_J cos φ and the same 200 as −E_J cos 2φ; E_C = 1, E_J/E_C = 10^U(−1, 6), 6 levels) | 400 of 400 `GARANTITO`; the 50-digit mpmath reference inside the interval in 2400 of 2400 levels; largest width 1.56e-13 GHz |
-| Time per guaranteed point (6 levels) | mean 0.51 s, median 0.16 s, max 3.8 s |
-| scqubits at ncut = 30 on the same 200 transmons (truth: scqubits at ncut = 300; wrong = error > 1e-6 × max(1, largest transition)) | wrong without a warning in 65 of 200 cases, all at E_J/E_C ≥ 7744 |
-| Adapter, mode `raddoppio`, ncut = 30 | flags 65 of 65 wrong results, 0 false alarms on the 135 right ones |
-| Adapter, mode `auto` | 0 of 200 wrong |
-| Device regime, 200 transmons (E_C 0.05–1 GHz, E_J/E_C 1–1000): our solver against the adapter in mode `auto` | largest difference on E_j − E_0: 2.3e-12 GHz |
-| Time per point, device regime, one BLAS thread (`OMP_NUM_THREADS=1`, same cases, separate run) | scqubits at ncut = 30: 0.29 ms; our float solver: 3.1 ms (about 11 times slower) |
-| The same with the default 8 BLAS threads | scqubits 0.71 ms (adapter `auto` 1.25 ms); our solver 29.5 ms (about 40 times slower: thread overhead on small matrices) |
+| 6 real transmons of arXiv:2407.17407 (up to 12 levels, up to cos 8φ) | 26 of 26 `GARANTITO`, width ≤ 1.1e-13 GHz; the authors' levels need ncut 10–20 to stay within 1 kHz |
+| Spherical rotor, RbCs (Blackmore et al. 2018: 129 Hz at ~1.2 V/cm, estimated field) | 130.3 Hz guaranteed for M = ±1 at 1.2 V/cm |
+| Molecule, RbCs, 16 transitions of Gregory et al. 2016 with their constants | 16 of 16 within 100 Hz of their model (max 94 Hz), intervals 7 mHz wide, 70 transitions in ~2.5 s |
+| Molecule, TlF, CeNTREX-TlF 0.4.0 | levels within 0.5 Hz at zero field and at 173 V/cm (with c₃_ours = 5·c₃_theirs: an operator identity); Zeeman μ_J/J convention of theirs not covered for J ≥ 2 |
+| Adapter rule "soglia-scq/1.0", 200 transmons × ncut 3…30 | 0 results `OK` outside the threshold; verdicts identical in GHz/MHz/Hz (0 of 1000 differ) |
+| Multiport sandbox, positive controls | network reached outside / blocked inside; file written outside / blocked inside; loop → timeout; 3 GiB → MemoryError; unknown key → `NON_VALIDA`; without bwrap → `SandboxAssente` |
+| Duffing against transmon, 200 transmons (E_J/E_C 5–500) | |δ_3| ≥ 1 MHz in 200 of 200 (median 34 MHz, 90th percentile 1.18 GHz); δ_3 = 0 near E_J/E_C ≈ 30.56 at n_g = 0, so this is a property of the sample, not of the regime |
+
+Mutation testing (author's benches, copies with a green control, PYTHONDONTWRITEBYTECODE=1): charge-basis rotor
+8 of 8; sphere 16 of 16 (+ 14 of 14 by the reviewer); molecule 24 of 24 (+ 21 of 21); adapter 18 of 18; multiport
+23 of 24 (+ 1 equivalent, declared; 2 of the reviewer's alive: `--new-session`, `--die-with-parent`, untested);
+Duffing 22 of 24 (+ 2 equivalent).
 
 ## Tests
 
-`cd tests && python -m unittest test_intervallo_garantito test_scqubits_adattatore test_rotore_spettro
-test_readme_example`, against the installed package (`pip install ".[scqubits,test]"`). Measured on 2026-11-10 from a clean clone, each
-in a new virtual environment with the package installed by pip from the clone:
+`cd tests && python -B -m unittest test_intervallo_garantito test_rotore_spettro test_scqubits_adattatore
+test_readme_example test_rotore_sferico_garantito test_molecola_iperfine_garantita test_ingressi_nemesis_qraft
+test_duffing_vs_transmon test_multiporta test_porta_centrex_tlf`, against the installed package. The sandbox tests
+need `bwrap`; they are skipped with that reason when it is missing or cannot create namespaces. `test_porta_centrex_tlf`
+runs only with `QRAFT_BERSAGLI_VENV` pointing at a venv with centrex-tlf. Results from clean venvs: see the table kept in
+this section (measured, see CHANGELOG for dates).
 
-| Python | numpy, scipy | Result |
-|---|---|---|
-| 3.11.2 | 2.4.6, 1.17.1 | 56 tests, OK |
-| 3.12.15 | 2.5.4, 1.18.1 | 56 tests, OK |
-| 3.13.15 | 2.5.4, 1.18.1 | 56 tests, OK |
-| 3.11.2, without the extras (no scqubits, no mpmath) | 2.4.6, 1.17.1 | 56 tests, OK, 40 skipped |
+Measured on 2026-11-11 from this tree, each Python in a fresh venv (`pip install --no-deps .` after the dependencies),
+run from `tests/` with the command above, `bwrap` 0.8.0 present:
 
-Python 3.10 was not available on the author's machine: the CI matrix includes it, not yet run. Positive control: each
-of 8 evident mutants of the three modules (the L_out check removed, an uncertain pivot counted, the lower bound taken
-from H_N, L_out without max(1, 1/α), no basis doubling, NaN accepted, the warning never raised, the adapter's domain
-check removed) makes the suite fail (Python 3.11).
+| Python | numpy, scipy, python-flint | scqubits | Result |
+|---|---|---|---|
+| 3.11.2 | 2.4.6, 1.17.1, 0.9.0 | 4.3.1 | 151 tests, OK, 5 skipped (3 `test_porta_centrex_tlf` without `QRAFT_BERSAGLI_VENV`, 2 diatomic-py absent) |
+| 3.12.15 | 2.5.4, 1.18.1, 0.9.0 | absent | 151 tests, OK, 15 skipped (the 5 above + 10 of the scqubits adapter and README example) |
+| 3.13.15 | 2.5.4, 1.18.1, 0.9.0 | 4.3.1 | 151 tests, OK, 5 skipped |
+| 3.14.8 | 2.5.4, 1.18.1, 0.9.0 | absent | 151 tests, OK, 15 skipped |
+| 3.11.2 with `QRAFT_BERSAGLI_VENV` (venv with centrex-tlf 0.4.0) | | | `test_porta_centrex_tlf`: 4 tests, OK |
 
-**Reported on 2026-11-08 and 2026-11-09** in the author's measurement logs (not in this repository, not re-run here):
-
-- Out of sample, 2000 new transmon cases (other seed, ncut drawn among 15, 30, 60): the warning flagged 604 of 604
-  wrong results with 0 false alarms on 1396; out of distribution, 4976 cases with E_C from 1e-3 to 1e2 GHz and
-  E_J/E_C from 1e-3 to 1e7: no miss and no false alarm.
-- A 24-harmonic transmon model fitted to the 6 devices of arXiv:2407.17407 (Table I): 12 levels, 6 of 6 `GARANTITO`,
-  width at most 1.14e-13 GHz, 8.6–13.2 s per device.
-- Guaranteed intervals exist up to E_J/E_C = 5e6 (k = 6); at 1e7 the counts stay uncertain at 1024 bits and the result
-  is `FuoriDominio` with that reason.
+Python 3.10 was not available on the author's machine: the CI matrix includes it, not yet run. The 25 sandbox tests
+ran with bubblewrap on all four versions (1 skipped on each: `test_scqubits_e_diatomic` needs both extras).
 
 ## Limits
 
-- **The 50-digit mpmath references are not independent of the truncation.** They diagonalize the same charge-basis
-  matrix, only larger and in higher precision: they confirm the arithmetic, not the truncation bound. The truncation
-  bound rests on the proof. An independent reference (Mathieu characteristic values by continued fractions,
-  DLMF §28.6) is future work; the existing comparison with scipy's Mathieu functions (cos 2φ, n_g = 0) is only a
-  1e-8 consistency check.
-- The proof is the author's assembly of standard steps and has had no external review; prior art is in
-  `docs/PROOF.md`.
-- **The default threshold of the scqubits warning is relative, and too loose in the device regime.** It is
-  1e-6 × max(1, largest transition), which for transmons with E_J/E_C 5–500 reaches 1.8e-5 GHz (18 kHz). Measured by
-  the author on 2026-11-10 (200 transmons, E_J/E_C 5.5–492, truth = the guaranteed intervals, "wrong" = more than
-  1e-6 GHz away; log not in this repository): with the default threshold 8 wrong results passed without a warning
-  (4 of 63 at ncut = 10, 4 of 4 at ncut = 15); with `tol=1e-6` (GHz, absolute) all 67 were flagged with 0 false
-  alarms. In the device regime pass an absolute `tol`, for example `spettro_scqubits(r, k, ncut, tol=1e-6)`. The
-  same measurement found scqubits correct within 1 kHz on 200 of 200 cases at ncut = 30.
-- Sines (for example the kite away from φ_ext = π) need a complex Hermitian count: not done, refused with a reason.
+- The 50-digit mpmath references of the charge-basis rotor are not independent of the truncation: they confirm the
+  arithmetic, not the truncation bound, which rests on the proof. Guaranteed Mathieu characteristic values as an
+  independent reference are planned, not done.
+- The proof is the author's assembly of standard steps, reviewed adversarially by an independent AI agent (its
+  reports are in the author's repository), not by a human mathematician.
+- Molecule: fields along z only; no AC polarizability; the CeNTREX-TlF Zeeman convention μ_J/J is not covered for
+  J ≥ 2 (declared); quadrupole with I < 1 is refused, not zeroed.
+- Multiport: user-namespace sandbox, not a VM; /etc is mounted read-only (what any user process reads); the test ports
+  `prova_*` are controls, not solvers.
+- Adapter: the float floor is a plausible bound (16× the nominal tolerance of LAPACK ?stebz), not a proof.
 - Speed: see above.
 
-## Provenance of releases
+## Provenance
 
-There is no release yet. Releases are planned to carry Sigstore build-provenance attestations from the release
-workflow; until then, a copy can be checked only against this repository (`FILE_LIST.tsv` lists every file with its
-sha256, `python check_tree.py` checks them).
+There is no release yet. `FILE_LIST.tsv` lists every file with its sha256 and, for the modules derived from the
+author's repository, the sha256 of the source file; `python check_tree.py` checks the list, the imports, a deny-list
+and runs gitleaks.
 
 ## License
 
