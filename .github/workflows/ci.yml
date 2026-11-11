@@ -19,8 +19,13 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
-      - name: Install bubblewrap (sandbox of the multiport; if user namespaces are denied on the runner the sandbox tests are SKIPPED with that reason, see tests/test_multiporta.py)
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap && bwrap --version
+      - name: Install bubblewrap and allow unprivileged user namespaces (Ubuntu 24.04 restricts them through AppArmor); the job fails if the sandbox cannot start, so the sandbox tests run here and are never skipped
+        run: |
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y bubblewrap
+          bwrap --version
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --unshare-all --ro-bind / / --dev /dev --proc /proc true
       - name: Install
         run: |
           python -m pip install -r requirements/ci.txt

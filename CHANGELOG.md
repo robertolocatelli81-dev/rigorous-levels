@@ -58,8 +58,12 @@ Fixed before publication (adversarial review of 2026-11-11):
 Changed:
 
 - `pyproject.toml`: dependency on sympy (3j symbols); optional extra `porte` with the external solvers.
-- CI: Python 3.10–3.14 (python-flint 0.9.0 wheels exist for 3.10–3.14), bubblewrap installed on the runner; if the
-  runner denies unprivileged user namespaces the sandbox tests are skipped with that reason, not passed.
+- CI: Python 3.10–3.14 (python-flint 0.9.0 wheels exist for 3.10–3.14); bubblewrap installed on the runner and
+  unprivileged user namespaces allowed (Ubuntu 24.04 restricts them through AppArmor); the job fails if the sandbox
+  cannot start, so in CI the sandbox tests run and are not skipped.
+- Tests: `test_scqubits_adattatore` and `test_porta_centrex_tlf` decide whether the sandbox is usable with the same probe
+  as `test_multiporta` (bwrap started with `--unshare-all`), not with the presence of `bwrap` on PATH: on a runner where
+  `bwrap` exists but cannot create namespaces the sandbox test raised an error instead of being skipped.
 - `check_tree.py`: the closed list of allowed third-party imports includes sympy and the optional port packages.
 
 Reported upstream (public, by the author, 2026-11-11; the package reproduces each one, see README):

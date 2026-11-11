@@ -4,6 +4,7 @@
 note dell'autore (non pubblicate). Ogni test deve poter fallire: controlli positivi sulla formula e sui rami."""
 import importlib.util
 import shutil
+import subprocess
 import unittest
 
 import numpy as np
@@ -13,8 +14,22 @@ from qraft_ra import scqubits_adattatore as A  # noqa: E402
 from qraft_ra.rotore_spettro import Rotore  # noqa: E402
 
 SCQ = importlib.util.find_spec("scqubits") is not None
-BWRAP = shutil.which("bwrap") is not None
 FLINT = importlib.util.find_spec("flint") is not None
+
+
+def _bwrap_funziona():
+    """bwrap presente E capace di creare i namespace (stessa sonda di test_multiporta: su runner con userns non
+    privilegiati negati bwrap esiste ma fallisce, e i test della sandbox vanno SALTATI con questo motivo)."""
+    if shutil.which("bwrap") is None:
+        return False
+    try:
+        return subprocess.run(["bwrap", "--unshare-all", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+                               "true"], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+BWRAP = _bwrap_funziona()
 
 
 class mock_nostro:

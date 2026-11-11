@@ -7,18 +7,32 @@ import glob
 import os
 import pwd
 import shutil
+import subprocess
 import unittest
 
 
 from qraft_ra import molecola_iperfine_garantita as MI  # noqa: E402
 from qraft_ra import multiporta as MP  # noqa: E402
 
+
+def _bwrap_funziona():
+    """bwrap presente E capace di creare i namespace (stessa sonda di test_multiporta: su runner con userns non
+    privilegiati negati bwrap esiste ma fallisce, e i test della sandbox vanno SALTATI con questo motivo)."""
+    if shutil.which("bwrap") is None:
+        return False
+    try:
+        return subprocess.run(["bwrap", "--unshare-all", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+                               "true"], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 # casa REALE dal database utenti: con HOME temporanea (obbligatoria nei banchi) expanduser("~") salterebbe i test in silenzio
 VENV = os.environ.get("QRAFT_BERSAGLI_VENV", os.path.join(pwd.getpwuid(os.getuid()).pw_dir, ".venvs", "qraft_bersagli"))
 PY = os.path.join(VENV, "bin", "python")
 SP = tuple(p for p in glob.glob(os.path.join(VENV, "lib", "python3*", "site-packages"))
            if os.path.isdir(os.path.join(p, "centrex_tlf")))
-PRONTO = shutil.which("bwrap") is not None and os.path.exists(PY) and len(SP) == 1 and os.environ.get("QRAFT_BERSAGLI_VENV") is not None
+PRONTO = _bwrap_funziona() and os.path.exists(PY) and len(SP) == 1 and os.environ.get("QRAFT_BERSAGLI_VENV") is not None
 
 # XConstants di centrex-tlf 0.4.0
 B0, D0 = 6689.8736e6 - 45.0843e6 / 2 + 0.0942e6 / 4, 5.84e3
