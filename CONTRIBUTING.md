@@ -7,7 +7,7 @@ Issues and pull requests are welcome. Security problems: see `SECURITY.md` (priv
 1. **No number without a proof or a reason.** An interval marked GARANTITO must follow from `docs/PROOF.md`; where the
    proof does not apply, the code raises `FuoriDominio` with the reason instead of returning a number.
 2. **Unknown input is refused with a named reason, and a test shows it.** `Rotore` refuses NaN, ±inf, booleans,
-   strings and other non-numbers, non-integer or non-positive harmonics and E_C ≤ 0 (`tests/test_rotore_spettro.py`,
+   strings and other non-numbers, non-integer or non-positive harmonics and E_C ≤ 0 (`tests/test_rotor_spectrum.py`,
    including 400 random inputs); `livelli_garantiti` refuses anything outside the domain of the proof with
    `FuoriDominio`; the adapter refuses any rotor that is not a transmon.
 3. **Tests first fail, then pass.** A fix comes with a test that fails on the old code. A new check comes with a
@@ -25,9 +25,9 @@ Issues and pull requests are welcome. Security problems: see `SECURITY.md` (priv
 ```sh
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements/ci.txt && pip install --no-deps .
-cd tests && python -B -m unittest test_intervallo_garantito test_rotore_spettro test_scqubits_adattatore test_readme_example \
-    test_rotore_sferico_garantito test_molecola_iperfine_garantita test_ingressi_nemesis_qraft test_duffing_vs_transmon \
-    test_multiporta test_porta_centrex_tlf && cd ..
+cd tests && python -B -m unittest test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_readme_example \
+    test_spherical_rotor test_hyperfine_molecule test_inputs_review test_duffing_vs_transmon test_mathieu test_fluxonium \
+    test_multiport test_port_centrex_tlf test_parameter_balls test_matrix_elements test_examples test_generative_inputs test_deprecated_aliases && cd ..
 git add -A                      # check_tree.py lists files with git (tracked + untracked, .gitignore respected)
 python check_tree.py --update   # needs gitleaks on PATH
 python check_tree.py --positive-control

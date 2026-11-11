@@ -1,17 +1,27 @@
 name: ci
 on:
   push:
-    branches: [main]
+    branches: [main, fable-0.3]
   pull_request:
 permissions:
   contents: read
+env:
+  PIP_NO_CACHE_DIR: "1"
+  OMP_NUM_THREADS: "1"
 jobs:
-  test:
+  # ── Linux x86-64: every Python, bwrap + podman + docker engines, stack 8 MiB (default), unlimited and 1 MiB ──
+  linux:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        stack: ["default"]
+        include:
+          - {python: "3.14", stack: "unlimited"}
+          - {python: "3.14", stack: "1024"}
+          - {python: "3.11", stack: "unlimited"}
+          - {python: "3.11", stack: "1024"}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -19,13 +29,18 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
-      - name: Install bubblewrap and allow unprivileged user namespaces (Ubuntu 24.04 restricts them through AppArmor); the job fails if the sandbox cannot start, so no test is skipped here for lack of the sandbox
+      - name: Install bubblewrap and podman, allow unprivileged user namespaces (Ubuntu 24.04 restricts them through AppArmor); the job fails if bwrap cannot start
         run: |
           sudo apt-get -o Acquire::Retries=5 update
-          sudo apt-get -o Acquire::Retries=5 install -y bubblewrap
-          bwrap --version
+          sudo apt-get -o Acquire::Retries=5 install -y bubblewrap podman
+          bwrap --version; podman --version; docker --version
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           bwrap --unshare-all --ro-bind / / --dev /dev --proc /proc true
+      - name: Pull the container image of this Python once (the package itself never pulls)
+        run: |
+          IMG="docker.io/library/python:${{ matrix.python }}-slim"
+          podman pull "$IMG" && podman image inspect "$IMG" >/dev/null
+          docker pull "$IMG" && docker image inspect "$IMG" >/dev/null
       - name: Install
         run: |
           python -m pip install -r requirements/ci.txt
@@ -40,8 +55,122 @@ jobs:
         run: |
           python check_tree.py
           python check_tree.py --positive-control
-      - name: Tests (against the installed package)
+      - name: Tests against the installed package, stack ${{ matrix.stack }}; the sandbox tests must run for bwrap, podman and docker (not be skipped)
         run: |
+          case "${{ matrix.stack }}" in default) ;; unlimited) ulimit -s unlimited ;; *) ulimit -s ${{ matrix.stack }} ;; esac
+          ulimit -s
           cd tests
           python -c 'import qraft_ra; assert "site-packages" in qraft_ra.__file__, qraft_ra.__file__; print(qraft_ra.__file__)'
-          python -B -m unittest -v test_intervallo_garantito test_rotore_spettro test_scqubits_adattatore test_readme_example test_rotore_sferico_garantito test_molecola_iperfine_garantita test_ingressi_nemesis_qraft test_duffing_vs_transmon test_multiporta test_porta_centrex_tlf
+          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_readme_example test_spherical_rotor test_hyperfine_molecule test_inputs_review test_duffing_vs_transmon test_multiport test_port_centrex_tlf test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_examples test_generative_inputs test_deprecated_aliases 2>&1 | tee ../unittest.log
+          test "${PIPESTATUS[0]}" -eq 0
+          for e in bwrap podman docker; do grep -q "TestSandbox_$e.test_s1_rete_bloccata) ... ok" ../unittest.log || { echo "engine $e: the S1 test did not run"; exit 1; }; done
+      - name: Deprecated Italian aliases are the only source of DeprecationWarning (the English API is warning-free)
+        run: |
+          cd tests
+          python -W error::DeprecationWarning -B -m unittest test_guaranteed_intervals test_rotor_spectrum test_mathieu
+
+  # ── Linux ARM64: bwrap + docker (podman is installed too), Python 3.12 and 3.14 ──
+  linux-arm:
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: bubblewrap, podman, user namespaces, container image
+        run: |
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y bubblewrap podman
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --unshare-all --ro-bind / / --dev /dev --proc /proc true
+          IMG="docker.io/library/python:${{ matrix.python }}-slim"
+          docker pull "$IMG"; podman pull "$IMG"
+      - name: Install and test (sandbox tests must run for bwrap and docker)
+        run: |
+          python -m pip install -r requirements/ci.txt
+          python -m pip install --no-deps .
+          cd tests
+          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_spherical_rotor test_hyperfine_molecule test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_generative_inputs 2>&1 | tee ../unittest.log
+          test "${PIPESTATUS[0]}" -eq 0
+          for e in bwrap docker; do grep -q "TestSandbox_$e.test_s1_rete_bloccata) ... ok" ../unittest.log || { echo "engine $e: the S1 test did not run"; exit 1; }; done
+
+  # ── macOS (ARM64 runner): everything that is not a sandbox, plus the sandbox-exec engine (S1–S7) ──
+  macos:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: State of sandbox-exec on this macOS (the man page marks it DEPRECATED; measured here, not assumed)
+        run: |
+          sw_vers; uname -m
+          which sandbox-exec
+          man -w sandbox-exec || true
+          sandbox-exec -p '(version 1)(deny default)(allow process-exec (literal "/usr/bin/true"))(allow file-read*)' /usr/bin/true && echo "sandbox-exec runs a deny-default profile"
+      - name: Install and test (the sandbox-exec S1 test must run)
+        run: |
+          python -m pip install -r requirements/ci.txt
+          python -m pip install --no-deps .
+          cd tests
+          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_spherical_rotor test_hyperfine_molecule test_duffing_vs_transmon test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_examples test_generative_inputs test_deprecated_aliases 2>&1 | tee ../unittest.log
+          test "${PIPESTATUS[0]}" -eq 0
+          grep -q "TestSandbox_sandbox_exec.test_s1_rete_bloccata) ... ok" ../unittest.log || { echo "sandbox-exec: the S1 test did not run"; exit 1; }
+
+  # ── Windows: everything that is not a sandbox, plus the AppContainer + Job Object engine (S1–S7) ──
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install and test (the appcontainer S1 test must run)
+        shell: bash
+        run: |
+          python -m pip install -r requirements/ci.txt
+          python -m pip install --no-deps .
+          cd tests
+          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_spherical_rotor test_hyperfine_molecule test_duffing_vs_transmon test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_examples test_generative_inputs test_deprecated_aliases 2>&1 | tee ../unittest.log
+          test "${PIPESTATUS[0]}" -eq 0
+          grep -q "TestSandbox_appcontainer.test_s1_rete_bloccata) ... ok" ../unittest.log || { echo "appcontainer: the S1 test did not run"; exit 1; }
+
+  # ── Free-threaded Python 3.14t: the pure-math modules (python-flint publishes cp314t wheels? measured here: the job
+  #    reports which dependencies have wheels and skips the modules whose dependency is missing) ──
+  free-threaded:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14t"
+      - name: Install what has wheels (no build from source), report the rest
+        run: |
+          python -c 'import sys; print(sys.version, "GIL enabled:", sys._is_gil_enabled())'
+          for p in numpy scipy python-flint sympy mpmath; do python -m pip install --only-binary=:all: "$p" || echo "NO WHEEL: $p"; done
+          python -m pip install --no-deps .
+      - name: Tests (modules whose dependency is missing are skipped with the reason)
+        run: |
+          cd tests
+          python -B -m unittest -v test_rotor_spectrum test_guaranteed_intervals test_spherical_rotor test_mathieu test_fluxonium test_generative_inputs 2>&1 | tee ../unittest.log
+          test "${PIPESTATUS[0]}" -eq 0

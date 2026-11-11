@@ -30,7 +30,7 @@ import tempfile
 ELENCO = "FILE_LIST.tsv"
 KINDS = ("copy", "derived", "new")
 TERZE_PARTI = {"numpy", "scipy", "flint", "mpmath", "scqubits", "sympy",
-               # porte opzionali della multiporta (importate solo dentro la sandbox, nel runner):
+               # optional ports of the multiport (imported only inside the sandbox, by the runner):
                "diatomic", "SQcircuit", "pyEPR", "centrex_tlf", "transmon_charge_basis", "transmon_CPB_analytic"}
 # modules absent from the repository, imported only inside a try that treats their absence as an error (failed, not skipped)
 ASSENTI_DICHIARATI = set()
@@ -80,7 +80,8 @@ def leggi_elenco(radice, difetti):
 
 def moduli_ammessi(radice, voci):
     """nudi: names of the test modules outside src/; qualificati: modules and packages of src/; nomi_pacchetto: for each
-    package, the names assigned at the top level of its __init__.py (for "from qraft_ra import __version__")."""
+    package, the names assigned or re-exported (from … import) at the top level of its __init__.py (for
+    "from qraft_ra import __version__, Rotor")."""
     nudi, qualificati, nomi_pacchetto = set(), set(), {}
     for p in voci:
         if not p.endswith(".py"):
@@ -100,6 +101,8 @@ def moduli_ammessi(radice, voci):
             for n in corpo:
                 if isinstance(n, ast.Assign):
                     nomi |= {t.id for t in n.targets if isinstance(t, ast.Name)}
+                elif isinstance(n, ast.ImportFrom) and not n.level:      # names re-exported by the package
+                    nomi |= {a.asname or a.name for a in n.names}
             nomi_pacchetto[nome] = nomi
         else:
             nome = ".".join(parti)

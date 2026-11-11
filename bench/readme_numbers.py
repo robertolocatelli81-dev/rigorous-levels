@@ -25,9 +25,9 @@ import numpy as np
 import scqubits as sq
 from mpmath.matrices.eigen_symmetric import tridiag_eigen
 
-from qraft_ra import intervallo_garantito as IG
-from qraft_ra import scqubits_adattatore as SA
-from qraft_ra.rotore_spettro import OK, Rotore, spettro
+from qraft_ra import guaranteed_intervals as IG
+from qraft_ra import scqubits_adapter as SA
+from qraft_ra.rotor_spectrum import OK, Rotor, spectrum
 
 sq.settings.PROGRESSBAR_DISABLED = True
 K = 6
@@ -89,27 +89,27 @@ def main(full):
     t = {"scqubits_ncut30": [], "adapter_auto": [], "adapter_doubling": [], "ours": []}
     diff_tr = 0.0
     for ec, ej, ng in device_regime():
-        r = Rotore.transmon(ec, ej, ng)
+        r = Rotor.transmon(ec, ej, ng)
         _, t0 = ms(lambda: sq.Transmon(EJ=ej, EC=ec, ng=ng, ncut=30, truncated_dim=K).eigenvals(evals_count=K))
-        a, t1 = ms(lambda: SA.spettro_scqubits(r, K, controllo="auto", tol=1e-10))
-        _, t2 = ms(lambda: SA.spettro_scqubits(r, K, 30, controllo="raddoppio"))
-        b, t3 = ms(lambda: spettro(r, K, 1e-11))
+        a, t1 = ms(lambda: SA.scqubits_spectrum(r, K, check="auto", tol=1e-10))
+        _, t2 = ms(lambda: SA.scqubits_spectrum(r, K, 30, check="doubling"))
+        b, t3 = ms(lambda: spectrum(r, K, 1e-11))
         for k, v in zip(t, (t0, t1, t2, t3)):
             t[k].append(v)
-        assert a.stato == OK and b.stato == OK
-        ea, eb = np.array(a.energie), np.array(b.energie)
+        assert a.state == OK and b.state == OK
+        ea, eb = np.array(a.energies), np.array(b.energies)
         diff_tr = max(diff_tr, float(np.max(np.abs((ea - ea[0]) - (eb - eb[0])))))
     res["device_regime"] = {"cases": 200, "max_diff_transitions_GHz": diff_tr,
                             "mean_ms": {k: round(statistics.fmean(v), 3) for k, v in t.items()}}
     # 2. wide range: scqubits at ncut = 30, alone and with the adapter
     rows = []
     for ej, ng in wide_range():
-        r = Rotore.transmon(1.0, ej, ng)
+        r = Rotor.transmon(1.0, ej, ng)
         ref = np.asarray(sq.Transmon(EJ=ej, EC=1.0, ng=ng, ncut=300, truncated_dim=K).eigenvals(evals_count=K))
         bare = np.asarray(sq.Transmon(EJ=ej, EC=1.0, ng=ng, ncut=30, truncated_dim=K).eigenvals(evals_count=K))
-        dbl = SA.spettro_scqubits(r, K, 30, controllo="raddoppio")
-        aut = SA.spettro_scqubits(r, K, 30, controllo="auto")
-        rows.append({"ej": ej, "wrong": wrong(bare, ref), "flag": dbl.stato != OK, "auto_wrong": wrong(aut.energie, ref)})
+        dbl = SA.scqubits_spectrum(r, K, 30, check="doubling")
+        aut = SA.scqubits_spectrum(r, K, 30, check="auto")
+        rows.append({"ej": ej, "wrong": wrong(bare, ref), "flag": dbl.state != OK, "auto_wrong": wrong(aut.energies, ref)})
     w = [x for x in rows if x["wrong"]]
     res["wide_range_ncut30"] = {"cases": 200, "wrong_silently": len(w),
                                 "smallest_EJ_EC_wrong": min((x["ej"] for x in w), default=None),
@@ -126,13 +126,13 @@ def main(full):
     states = {}
     for _, m, ej, ng in casi:
         t0 = time.perf_counter()
-        iv = IG.livelli_garantiti(Rotore(1.0, {m: -ej}, n_g=ng), K)
+        iv = IG.guaranteed_levels(Rotor(1.0, {m: -ej}, n_g=ng), K)
         secs.append(time.perf_counter() - t0)
-        states[iv.stato] = states.get(iv.stato, 0) + 1
+        states[iv.state] = states.get(iv.state, 0) + 1
         ref = reference(ej, ng, m)
-        inside += sum(iv.bassi[j] <= ref[j] <= iv.alti[j] for j in range(K))
+        inside += sum(iv.low[j] <= ref[j] <= iv.high[j] for j in range(K))
         levels += K
-        width = max(width, iv.larghezza_max)
+        width = max(width, iv.max_width)
     res["intervals"] = {"cases": len(casi), "levels": levels, "reference_inside": inside, "max_width_GHz": width,
                         "states": states, "seconds_mean": round(statistics.fmean(secs), 3),
                         "seconds_median": round(statistics.median(secs), 3), "seconds_max": round(max(secs), 3)}

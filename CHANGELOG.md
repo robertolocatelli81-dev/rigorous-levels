@@ -2,6 +2,142 @@
 
 All dates are from the author's system clock (Europe/Rome). Nothing here is published yet: no release, no PyPI.
 
+## 0.3.0 — 2026-11-11 (local, unreleased; branch fable-0.3 from 7beff99)
+
+Four limits of 0.2.0 were named by the author on 2026-11-11 and are closed or narrowed here (measurements in
+README "Measurements" and in the author's report; every number re-measured on this tree, dates and versions stated).
+
+### A. Tests that did not see what the CI saw
+
+0.2.0 shipped two defects found only by GitHub's CI (user namespaces denied by AppArmor; a nesting limit left to
+RecursionError, which depends on the stack size on Python 3.14). The class is closed, not the two cases:
+
+- `bench/matrix.sh`: the whole suite against the installed package on every venv given, with the stack at its
+  default, unlimited and 1 MiB, with the isolation engines present, with `bwrap` absent from PATH and with a fake
+  `bwrap` that fails; every run in a fresh temporary HOME; one summary line per run plus the list of skips with
+  reasons.
+- CI: Linux x86-64 (3.10–3.14, stack default/unlimited/1 MiB, bwrap + podman + docker engines, each one's S1 test
+  required to run), Linux ARM64 (3.12, 3.14; bwrap + docker), macOS (3.12, 3.14; everything that is not a sandbox
+  plus the `sandbox-exec` engine, state of that tool measured on the runner), Windows (3.12, 3.14; everything that is
+  not a sandbox plus the `appcontainer` engine), free-threaded 3.14t (pure-math modules, dependencies installed only
+  from wheels). The jobs run when the branch is pushed: not yet.
+- `tests/test_generative_inputs.py`: seeded random attacks on every public entry point (unknown keyword, wrong type,
+  NaN/inf, bool, integers beyond float64, unicode, nested containers, numpy scalars) must give exactly the declared
+  refusal; a valid input of the same family must pass (positive control); no public function accepts `**kwargs`.
+  Defects it found in this tree before the fix (all fixed): `Rotor`, `spectrum`, `guaranteed_levels`,
+  `mathieu_value` crashed with OverflowError on an integer beyond float64 instead of refusing it; `spectrum`
+  accepted a non-integer `nmax_limit`; `SphericalRotor` accepted any |M| and `guaranteed_sphere_levels` any
+  `L_limit`; `guaranteed_levels` accepted any `N_limit`; `mathieu_a/b` took `**kw`. Caps are now declared constants
+  (`N_LIMIT`, `L_LIMIT`, `K_LIMIT`, `N_LIMIT` of the fluxonium, `NMAX_LIMIT`).
+- Audit of the dependence on interpreter limits (recursion, float conversion of big ints, locale, dict order,
+  encoding): no recursion in the parsers (the JSON depth is counted linearly), every float conversion of an input
+  goes through a guard, `json.dumps` with `sort_keys` where a canonical form is needed, every file opened with an
+  explicit encoding; `resource`, `socket`, `os.fork`, `os.kill` are optional in the runner (Windows, WASI).
+
+### B. English API
+
+Modules, classes, functions, keyword arguments, fields, states and error messages are English. Old → new:
+`intervallo_garantito` → `guaranteed_intervals` (`livelli_garantiti` → `guaranteed_levels`, `Intervalli` →
+`Intervals` with `low/high/strings/max_width/state/seconds`, `GARANTITO/LARGO` → `GUARANTEED/WIDE`,
+`FuoriDominio/ArbAssente/TempoScaduto` → `OutOfDomain/ArbMissing/DeadlineExceeded`); `rotore_spettro` →
+`rotor_spectrum` (`Rotore` → `Rotor` with `cosines/sines`, `spettro` → `spectrum`, `Spettro` → `Spectrum` with
+`energies/error/floor/state`, `NON_CONVERGENTE` → `NOT_CONVERGED`, `IngressoRifiutato` → `InputRejected`);
+`scqubits_adattatore` → `scqubits_adapter` (`spettro_scqubits` → `scqubits_spectrum` with `check=` in
+`none/doubling/auto`, `unit=`, `engine=` in `process/sandbox`, states `UNCHECKED`, `OK_FLOAT_FLOOR`, origins
+`absolute/relative/user/floor`, rule id `scq-threshold/1.0`); `rotore_sferico_garantito` → `spherical_rotor`
+(`RotoreSferico` → `SphericalRotor`, `livelli_sfera_garantiti` → `guaranteed_sphere_levels`, `N_fis` → `N_phys`);
+`molecola_iperfine_garantita` → `hyperfine_molecule` (`MolecolaSigma` → `SigmaMolecule` with `two_I1/two_I2`,
+`livelli_molecola_garantiti` → `guaranteed_molecule_levels` with `two_MF`, `dimensione_settore` →
+`sector_dimension`); `multiporta` → `multiport` (`Richiesta/Uscita/Verdetto` → `Request/Output/Verdict`,
+`esegui_porta/confronta/valida_uscita/leggi_uscita` → `run_port/compare/validate_output/read_output`, verdicts
+`INSIDE/INSIDE_TOLERANCE/OUTSIDE/NOT_COMPARABLE`, output states `OK/ERROR/INVALID`); `porte_runner` → `port_runner`;
+`duffing_vs_transmon` (`errore_duffing` → `duffing_error`, variants `spectrum/koch`, `ErroreDuffing` → `DuffingError`).
+The Italian modules remain as deprecated aliases (`qraft_ra._compat`): importing them or using any old name emits a
+DeprecationWarning that names the replacement; keyword arguments are translated; the fields of the results have
+Italian read-only aliases; `tests/test_deprecated_aliases.py` measures that the old names work and that the
+English API is warning-free under `-W error::DeprecationWarning`.
+Formats on disk changed with a new version declared first: the port contract is "qraft-port/0.2"
+(`docs/PORT_CONTRACT.md`, English keys, port names `numpy_rotor`, `test_*`, model types `cos_rotor`,
+`sigma_molecule`; "qraft-porta/0.1" is refused); the threshold rule is "scq-threshold/1.0"
+(`docs/THRESHOLD_RULE.md`, same content as "soglia-scq/1.0").
+Not translated: test method names and test docstrings (prose, not API), kept from 0.2.0.
+
+### C. Isolation beyond Linux (`qraft_ra.isolation`, the same contract for every engine)
+
+- Engines, closed list with a declared order of strength (`ENGINE_ORDER`, docs/PORT_CONTRACT.md §6.0): `podman`,
+  `docker` (OCI container: `--network none --read-only --cap-drop ALL --security-opt no-new-privileges`, non-root
+  user, tmpfs /tmp, site-packages and work folder read-only, image taken only from the local store, kill on timeout
+  from the host), `bwrap` (as in 0.2.0), `sandbox-exec` (macOS, deny-default Seatbelt profile: no network, reads
+  everything except the user's homes, writes only the output file), `appcontainer` (Windows: AppContainer process
+  through `CreateAppContainerProfile` / `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`, read grants to the
+  interpreter and site-packages for the container SID, Job Object limits on memory, process count and CPU time),
+  `wasm` (wasmtime + a CPython built for WASI: no sockets, only pre-opened folders, interpreter folder required
+  read-only, `-W max-memory-size`, `-W timeout`).
+- `run_port(request, engine="auto")` picks the first engine of the order whose fail-closed PROBE passes (engine
+  executable present; containers: image present locally and, inside, only the `lo` interface, uid ≠ 0, read-only
+  root; sandbox-exec/appcontainer/wasm: network closed, root not writable, home not visible); the engine used is
+  named in `Output.sandbox`. Nothing degrades silently: no engine → `SandboxMissing` with every reason.
+- Tests: the S1–S7 controls run once per engine available (`TestSandbox_<engine>` classes), skipped with the
+  probe's reason otherwise; CI requires the S1 test of the expected engines to have run.
+- Measured locally (Linux x86-64, 2026-11-11): bwrap 0.8.0 and podman 4.3.1 rootless pass S1–S7 (podman on cgroups
+  v1 ignores `--memory`/`--pids-limit` with a warning: not relied upon, the runner's rlimits apply); wasmtime 50.0.1
+  + CPython 3.15.2 WASI passes the controls that do not need numpy and has NO numpy, so no solver port can run there
+  (declared; `test_s3_memoria`, `s6`, `s7`, scqubits tests skipped with that reason). NOT measured locally:
+  docker, sandbox-exec, appcontainer, ARM64 (CI jobs written; they run after the push).
+- Runner: `resource`, `socket`, `os.fork`, `os.kill` optional; `QRAFT_OUTPUT_DIR` for engines that cannot bind a
+  single file into a read-only folder; `ok_then_crash` ends with `os._exit(137)` when SIGKILL is ignored (PID 1).
+
+### D. Wider field with guaranteed intervals
+
+- `parameter_balls`: E_C and the cosine coefficients as intervals (`RotorBall`, `guaranteed_levels_over_box`): the
+  level over the whole box from two guaranteed computations (E_C ↦ λ_j non-decreasing; coefficients ↦ λ_j Lipschitz
+  with constant Σ|Δc_m|, Weyl), docs/PROOF.md. Measured 2026-11-11 (`bench/parameter_balls.py`): 200 transmons of
+  the device regime with E_C, E_J ± 1 %, 6 levels, 5 inner points each: 0 of 1000 inner point intervals outside the
+  box interval; a point with E_J 3 % above the box detected outside in 187 of 200; box width 2.1× the observed
+  spread (median; max 5.5×: the Lipschitz bound is rigorous, not tight); 0.11 s per box. n_g as an interval: 0.4.
+- `scqubits_adapter.guaranteed_from_scqubits`: from a `scqubits.Transmon` or `Fluxonium` object, the guaranteed
+  intervals of its H and the verdict (`INSIDE` / `INSIDE_TOLERANCE` / `OUTSIDE` per level, tolerance 32·eps·‖H‖) on
+  its own `eigenvals()` at its own cutoff; closed list of classes, read by name and attributes.
+- The public API is exposed at the package level (`from qraft_ra import Rotor, guaranteed_levels, ...`, `__all__`).
+- `examples/` (three scripts run by `tests/test_examples.py` in a fresh interpreter), `CITATION.cff`,
+  `bench/compare_tools.py` (time per point against scqubits, scipy, numpy: the other tools are 37–340× faster on
+  the inputs of the README table).
+
+- `mathieu`: Mathieu characteristic values a_r(q), b_r(q) (r ≤ 200, any finite q, negative and large included) as
+  guaranteed intervals on the four Fourier sectors (Jacobi matrices with (0,1) = √2·q, d_0 = 1 ± q), same proof as
+  the rotor (Rayleigh–Ritz above, per-pair Young plus Gershgorin on the outer block below, Sylvester counts in Arb).
+  Measured 2026-11-11: r = 0…12, q = −400…400 step 0.5 (40 025 values), median 0.38 ms per value, 40 019
+  GUARANTEED at 1e-12 relative and 6 WIDE (valid, wider); scipy 1.17.1 and 1.18.1 give 52 values outside the
+  intervals (identical lists; 30 of them equal another order ≤ 12; all 52 confirmed wrong by an independent
+  tridiagonal reference at K = 400, which agrees with the intervals in 52 of 52); scipy 2.0.0.dev0+git20261108
+  gives 0. scipy is about 100× faster (3.6 µs median) and gives no guarantee.
+- `fluxonium`: H = 4E_C n² + (E_L/2)φ² − E_J cos(φ − 2π·flux) in the oscillator basis with the truncation closed by
+  a per-site lower bound (Young on every coupling pair, DLMF 18.14.8 tails on the Laguerre couplings) and dense LDLᵀ
+  counts in Arb. Measured 2026-11-11 against scqubits 4.3.1 `Fluxonium`: cutoff 110 inside the intervals in every
+  level of 4 published parameter sets × 3 flux points, cutoff 6 outside in at least one (negative control); width
+  5e-10 GHz, 0.4–6.5 s per device (N = 54…117). Published devices (parameters as printed, one-mode model): Zhang et
+  al. 2021 f01 = 13.8816 MHz guaranteed vs 14 MHz measured; Moskalenko et al. 2022 qubit A f01 = 685.731 MHz vs
+  688.224, f12 = 1831.204 MHz vs 1832 (shifts reported, not judged: two-mode fit, printed rounding).
+- `matrix_elements`: guaranteed enclosures of ⟨v_i|n|v_j⟩, ⟨v_i|cos mφ|v_j⟩, ⟨v_i|sin mφ|v_j⟩ for the charge-basis
+  rotor: the float eigenvectors of H_N are approximations whose distance from the true eigenvectors is bounded by
+  the exact residual against the FULL operator over the gap given by the guaranteed enclosures of the neighbouring
+  levels (spectral theorem), with ‖n v_j‖ bounded through ⟨(n − n_g)²⟩ ≤ (λ_j + ‖V‖)/4E_C (docs/PROOF.md). Measured
+  2026-11-11 (`bench/matrix_elements.py`, `tests/test_matrix_elements.py`): see README "Measurements".
+- `parameter_balls`: n_g as an interval too (band functions of Hill's equation monotone on [0, ½]: the extremes
+  are at the ends and at the band edges 0, ½ inside the interval; Reed–Simon XIII.89, Eastham 1973 Thm 2.3.1,
+  DLMF 28.12(i)); checked against a fine sampling of n_g at E_J/E_C = 5 and a point outside (tests).
+- Multiport: `python_rotor` (the reference tridiagonal in pure Python, Sturm bisection) and pure-Python control
+  ports, so that every engine, WebAssembly included, runs the full S1–S7 (measured: 16 of 17 tests of
+  `TestSandbox_wasm` run, the only skip is the scqubits/diatomic-py solver test); `python_rotor` agrees with
+  numpy's `eigvalsh` within 1e-11 GHz.
+- Not done: nothing of A–D is deferred. The deprecated Italian aliases stay (cost: one module and one test).
+
+### Other
+
+- `guaranteed_intervals.Intervals.contains(j, value)` (was `valore`); `rotor_spectrum.spectrum` checks that its
+  first argument is a `Rotor`.
+- `check_tree.py`: unchanged rules; `FILE_LIST.tsv` lists the new files.
+
 ## 0.2.0 — 2026-11-11 (local, unreleased)
 
 Added (every module carries its proof or its measurement in the docstring; identifiers, states and the docstrings of the

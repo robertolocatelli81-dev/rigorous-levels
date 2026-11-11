@@ -1,7 +1,8 @@
 # Why the intervals contain the true eigenvalues
 
-This is the argument implemented in `qraft_ra.intervallo_garantito`. The assembly of the steps is the author's and has
-had no external review; each step is standard and cited.
+This is the argument implemented in `qraft_ra.guaranteed_intervals`. The assembly of the steps is the author's; it has
+had no external human review (its adversarial reviews were automated, by an independent agent, reports in the author's
+repository); each step is standard and cited.
 
 ## The operator
 
@@ -114,3 +115,93 @@ random and extreme cases by an independent reviewer, while the mutant with the w
 RbCs with the constants of Gregory et al. 2016 reproduces their 16 hyperfine transitions within 100 Hz with intervals
 7 mHz wide; TlF with the constants of CeNTREX-TlF 0.4.0 agrees with their code within 0.5 Hz at zero field and at
 173 V/cm.
+
+## Mathieu characteristic values (0.3.0)
+
+`qraft_ra.mathieu`: a_r(q), b_r(q) are the eigenvalues of the four Jacobi matrices of the Fourier sectors (DLMF
+28.4): d_k = (2k+ν)² on the diagonal, q off the diagonal, except (0,1) = √2·q for a_{2n} and d_0 = 1 ± q for
+a_{2n+1} / b_{2n+1}; b_{2n+2} starts at k = 1. The three steps above apply on each sector with the cut K:
+
+- Upper bound: λ_n(H) ≤ λ_n(H_K) (Rayleigh–Ritz).
+- Lower bound: only the pair (K, K+1) with coupling q crosses the cut. For η > 0,
+  2q x_K x_{K+1} ≥ −η x_K² − (q²/η) x_{K+1}², so H ≥ (H_K − η e_K e_Kᵀ) ⊕ H_O′ with, on the outer block (Gershgorin
+  as a form, the first outer site has one outer neighbour and the others two, d_k increasing),
+  H_O′ ≥ t = min(d_{K+1} − |q| − q²/η, d_{K+2} − 2|q|); η = |q| is used. If t > high_n, λ_n(H) ≥ λ_n(H_K − η e_K e_Kᵀ).
+- Counts: the squares of the off-diagonal entries (q², 2q²) are exact rationals, so the tridiagonal LDLᵀ runs in Arb
+  on exact data; uncertain pivots raise the precision or move the point.
+
+Measured (2026-11-11, bench/mathieu_vs_scipy.py): r ≤ 12, q = −400…400 step 0.5, 40 025 values, 40 019
+GUARANTEED at 1e-12 relative width (6 WIDE: valid, wider), median 0.38 ms; a_r(0) = b_r(0) = r² contained for
+r ≤ 50; DLMF 28.2.3–4 symmetries; the sorted levels of the charge-basis rotor (E_C = 1, n_g = ν/2, 2q cos φ: a
+different code path) meet the sector intervals in the order a_0 < b_2 < a_2 < … and b_1 < a_1 < b_3 < …;
+scipy 1.17.1/1.18.1: 52 values outside, all confirmed wrong by an independent tridiagonal reference (K = 400).
+
+## Fluxonium in the oscillator basis (0.3.0)
+
+`qraft_ra.fluxonium`: H = H_0 + V with H_0 = ω(a†a + ½), ω = √(8E_LE_C), V = −E_J cos(φ − φ_ext), ‖V‖ ≤ E_J,
+φ = φ_zpf(a + a†). V is dense in the Fock basis: cos(φ − φ_ext)_{mn} = cos(π(|m−n|/2 − 2·flux)) · g_{mn} with
+g_{mn} = φ_zpf^{d} e^{−φ_zpf²/2} √(min!/max!) L_min^{(d)}(φ_zpf²), d = |m − n| (matrix elements of the displacement
+operator D(iφ_zpf)); built in Arb from the exact rationals 2E_C/E_L and 8E_LE_C.
+
+- Upper bound: λ_j(H) ≤ λ_j(PHP), P the projector on the first N Fock states.
+- Lower bound: PH_0Q = 0. For every pair (i < N, o ≥ N), 2V_io x_i x_o ≥ −|V_io|(x_i² + x_o²); summing,
+  H ≥ (PHP − diag r) ⊕ (QH_0Q + QVQ − diag c), r_i = Σ_{o≥N} |V_io|, c_o = Σ_{i<N} |V_io|. The outer block is
+  ≥ t = ω(N+½) − E_J − max_o c_o. If t > high_j, λ_j(H) ≥ λ_j(PHP − diag r). The couplings with o < N + N2 are
+  computed; for o ≥ N + N2 the bound |⟨i|D|o⟩| ≤ y^{d/2} √(o!/i!)/d! (DLMF 18.14.8, |L_n^{(α)}(x)| ≤ ((α+1)_n/n!) e^{x/2},
+  y = φ_zpf²) has ratio ≤ ρ = √(y(N+N2+1))/(N2+1) between consecutive o; with ρ ≤ ½ the row tails are ≤ 2v(i, N+N2)
+  and the column tails ≤ Σ_i v(i, N+N2). Why this is tight where the operator-norm route is not: ‖PVQ‖ stays O(E_J)
+  for every N (cos φ couples neighbouring Fock states with O(1) amplitude), while r_i is O(E_J) only for i near N,
+  where the low eigenvectors are negligible, so λ_j(PHP) − λ_j(PHP − diag r) shrinks super-exponentially with N.
+- Counts: dense LDLᵀ in Arb (N ≤ 240).
+
+Measured (2026-11-11, bench/fluxonium_devices.py, scqubits 4.3.1): four published parameter sets, 4 levels, width
+5e-10 GHz, N = 54…117, 0.4–6.5 s; scqubits `Fluxonium(cutoff=110)` inside every interval, `cutoff=6` outside in at
+least one level (negative control); with a vanishing E_J the levels are ω(j+½) (exact control).
+
+## Parameters as intervals (0.3.0)
+
+`qraft_ra.parameter_balls`: for the charge-basis rotor H(E_C, c) = 4E_C(n − n_g)² + Σ c_m cos(mφ) with E_C ∈ [E_C⁻, E_C⁺]
+and c_m ∈ [c_m⁻, c_m⁺] (n_g exact):
+
+- E_C ↦ λ_j is non-decreasing: H(E_C⁺) − H(E_C⁻) = 4(E_C⁺ − E_C⁻)(n − n_g)² ≥ 0 as a quadratic form on the common
+  form domain, so λ_j(E_C⁻, c) ≤ λ_j(E_C, c) ≤ λ_j(E_C⁺, c) (Teschl, Corollary 4.11).
+- c ↦ λ_j is Lipschitz: H(E_C, c) − H(E_C, c′) = Σ (c_m − c′_m) cos(mφ) is bounded with norm ≤ Σ|c_m − c′_m|, and a
+  bounded self-adjoint perturbation B moves every min-max eigenvalue by at most ‖B‖ (Teschl, Theorem 4.10:
+  λ_j(A + B) ≤ λ_j(A) + ‖B‖ and symmetrically), so |λ_j(E_C, c) − λ_j(E_C, c′)| ≤ Σ|c_m − c′_m|.
+
+- n_g ↦ λ_j: with ψ(φ) ↦ e^{i n_g φ}ψ(φ), H(n_g) is unitarily the Floquet operator of Hill's equation
+  −y″ + V(φ) y on the cell [0, 2π] with quasi-momentum 2π n_g: λ_j(n_g) is 1-periodic and even, and on [0, ½] every
+  band function is monotone (Reed–Simon IV, Theorem XIII.89; Eastham, *The Spectral Theory of Periodic Differential
+  Equations*, 1973, Theorem 2.3.1; for cos φ alone DLMF 28.12(i): the characteristic value a_ν(q) is monotone in ν on
+  each band). Hence over n_g ∈ [a, b] the extremes of λ_j are at a, b and at the band edges 0 and ½ (mod 1) inside
+  [a, b]: a finite set G of candidates, two guaranteed computations each.
+
+With c⁰ the midpoint and ρ = Σ(c_m⁺ − c_m⁻)/2: min_{g∈G} low_j(E_C⁻, c⁰, g) − ρ ≤ λ_j(E_C, c, n_g) ≤
+max_{g∈G} high_j(E_C⁺, c⁰, g) + ρ on the whole box. The bound is rigorous and in general not tight (the Lipschitz constant
+is attained only by a level that follows the potential rigidly); the true spread of the levels can be much smaller.
+Measured (2026-11-11, bench/parameter_balls.py): see README "Measurements".
+
+## Matrix elements between eigenvectors (0.3.0)
+
+`qraft_ra.matrix_elements`: the eigenvectors are not enclosed directly; the float eigenvectors ψ_j of H_N are
+approximations whose distance from the true v_j is bounded.
+
+- Residual, exact: r_j = (H − λ̃_j)ψ_j with λ̃_j the midpoint of the guaranteed enclosure of λ_j; ψ_j has finite
+  support, so Hψ_j is a finite vector and ε_j = ‖r_j‖/‖ψ_j‖ is computed in rational arithmetic (square roots
+  bounded by integer square roots).
+- Gap: δ_j = min(λ̃_j − high_{j−1}, low_{j+1} − λ̃_j) from the guaranteed enclosures of the neighbours (k + 1 levels
+  are enclosed; above level k the spectrum is ≥ low_{k}). If δ_j ≤ 0 the level is not separated: no bound.
+- Spectral theorem: for ψ normalised, ‖(H − λ̃)ψ‖² = Σ_l |⟨v_l, ψ⟩|² (λ_l − λ̃)² ≥ δ² Σ_{l≠j} |⟨v_l, ψ⟩|², hence
+  ‖(1 − P_j)ψ_j‖ ≤ ε_j/δ_j =: s_j (requires every eigenvalue other than λ_j to be at distance ≥ δ_j, which the
+  enclosures give). With the sign of v_j fixed by ⟨v_j, ψ_j⟩ ≥ 0: ‖ψ_j − v_j‖² = s² + (1 − √(1 − s²))² ≤ s_j² + s_j⁴
+  for s_j < 1, so ‖ψ_j − v_j‖ ≤ e_j := s_j(1 + s_j²).
+- For a bounded X: ⟨v_i|X|v_j⟩ − ⟨ψ_i|X|ψ_j⟩ = ⟨v_i − ψ_i|X v_j⟩ + ⟨X ψ_i|v_j − ψ_j⟩, so the error is ≤ ‖X‖(e_i + e_j);
+  ‖cos mφ‖ = ‖sin mφ‖ = 1. For X = n: the same identity with ‖n ψ_i‖ exact and
+  ‖n v_j‖ ≤ ‖(n − n_g)v_j‖ + |n_g|, ‖(n − n_g)v_j‖² = ⟨v_j|(H − V)|v_j⟩/(4E_C) ≤ (high_j + Σ|c_m|)/(4E_C).
+- ⟨ψ_i|X|ψ_j⟩ is exact: ⟨n′|cos mφ|n⟩ = ½(δ_{n′,n+m} + δ_{n′,n−m}), ⟨n′|sin mφ|n⟩ = (δ_{n′,n+m} − δ_{n′,n−m})/(2i); the
+  normalisation ‖ψ_i‖‖ψ_j‖ is enclosed by integer square roots.
+
+Measured (2026-11-11, bench/matrix_elements.py and tests): widths 1e-14 … 1e-13 on the device regime (residuals
+≈ 1e-14, gaps of GHz); scqubits `matrixelement_table` (ncut 40) inside the enclosures; the exact symmetry values
+(⟨j|n|j⟩ = ½ at n_g = ½, 0 at n_g = 0; ⟨0|cos φ|1⟩ = 0 at n_g = 0) inside; a vector of another rotor gives no bound
+(OutOfDomain), a vector mixed with 1e-4 of its neighbour widens the enclosure to ≈ 1e-4 and keeps the truth inside.
