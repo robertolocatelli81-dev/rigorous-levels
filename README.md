@@ -280,6 +280,24 @@ package, not the source tree). The sandbox tests run once per isolation engine w
 in a fresh interpreter and checks what it prints. `bench/matrix.sh VENV...` reproduces the CI matrix locally (stack
 default / unlimited / 1 MiB, engines present, bwrap absent, bwrap failing; fresh HOME per run).
 
+Measured on 2026-11-11 (23:20 CET) on this tree with `bench/matrix.sh` on the four venvs, each run against the
+package installed from the tree in a fresh temporary HOME, bwrap 0.8.0, podman 4.3.1 with the image
+`python:<minor>-slim` in the local store, wasmtime 50.0.1 + CPython 3.15.2 WASI: 20 of 20 runs OK, 321 tests each.
+
+| Python | numpy, scipy, python-flint | scqubits | stack default / unlimited / 1 MiB | bwrap hidden from PATH | fake bwrap (not root-owned) |
+|---|---|---|---|---|---|
+| 3.11.2 | 2.4.6, 1.17.1, 0.9.0 | 4.3.1 | OK, 65 skipped | OK, 84 skipped | OK, 84 skipped |
+| 3.12.15 | 2.5.4, 1.18.1, 0.9.0 | absent | OK, 79 skipped | OK, 98 skipped | OK, 98 skipped |
+| 3.13.15 | 2.5.4, 1.18.1, 0.9.0 | 4.3.1 | OK, 64 skipped | OK, 84 skipped | OK, 84 skipped |
+| 3.14.8 | 2.5.4, 1.18.1, 0.9.0 | absent | OK, 79 skipped | OK, 98 skipped | OK, 98 skipped |
+
+Every skip carries its reason: 19 each for the three engines absent on this machine (`docker`, `sandbox-exec`,
+`appcontainer`), 19 more for `bwrap` when it is hidden or fake (its probe fails: fail-closed), 3 for
+`test_port_centrex_tlf` without `QRAFT_BERSAGLI_VENV`, 1–3 for diatomic-py absent, 1 for the wasm solver test (no
+numpy under WASI), 1 for an interpreter under /usr (no piece to mount), and on 3.12/3.14 the scqubits tests and the
+README example (scqubits absent there). The bwrap, podman and wasm sandbox tests ran in every run where the engine
+was present (0 skipped for them).
+
 `python -m qraft_ra.reproduce` re-measures the numerical claims of this file offline, one `[PASS]`/`[FAIL]` line per
 claim with the measured and the published value (fast set: 22 s on the author's machine; `--full` adds the
 40 025-value Mathieu grid and the 200 wide-range transmons: 108 s); `--sabotage` alters the Mathieu solver and must
