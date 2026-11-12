@@ -27,6 +27,7 @@ import json
 import os
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -83,7 +84,7 @@ def _refuse_home_or_ancestor(p: str, engine: str) -> None:
     would become readable, the case interpreter_pieces() already refuses for bwrap."""
     real = os.path.realpath(p)
     for home in _user_homes():
-        if _inside(home, real) or real in ("/", os.path.abspath(os.sep)):
+        if _inside(home, real) or os.path.dirname(real) == real:     # any root: "/", "C:\\", "D:\\", a UNC share
             raise OutOfDomain(f"{engine}: {p!r} contains the user's home {home!r}: refused")
 
 
@@ -99,24 +100,47 @@ def _run(cmd: List[str], timeout: float, stderr_path: str, env: Dict[str, str]) 
 
 
 # ── bwrap (Linux) ──────────────────────────────────────────────────────────────────────────────────────────────────
+def _vouched_paths() -> List[str]:
+    """QRAFT_TRUSTED_ENGINES: exact real paths, os.pathsep-separated, compared as strings with the binary's real path:
+    an entry that is relative, a symlink, has '..', a trailing '/' or spaces around it vouches for nothing."""
+    return [x for x in os.environ.get("QRAFT_TRUSTED_ENGINES", "").split(os.pathsep) if x]
+
+
+_VOUCHED: Dict[str, str] = {}      # engine name -> real path of a user-owned binary accepted by QRAFT_TRUSTED_ENGINES
+
+
 def _trusted_exe(name: str, exe: str) -> str:
-    """The engine executable must not be replaceable by this user: on POSIX owned by root and not writable by group or
-    others (a user-owned «podman», «docker», «bwrap» or «wasmtime» on PATH could run the port without isolation and
-    forge the probe, which is measured from INSIDE the engine). Windows has no owner uid here: not checked."""
+    """The REAL path of the engine executable, which must not be replaceable by this user: on POSIX a regular file
+    owned by root, not writable by group or others, in folders (from / down) owned by root and not writable by group
+    or others (otherwise the file could be swapped after this check: the path returned is the one executed). A
+    user-owned binary is accepted only if its exact real path is listed in QRAFT_TRUSTED_ENGINES; it is then named in
+    Output.sandbox, because this user's processes can replace it (the probe, measured from inside, can be forged).
+    Windows has no owner uid here: not checked."""
     if os.name != "posix":
         return exe
     real = os.path.realpath(exe)
     st = os.stat(real)
+    if not stat.S_ISREG(st.st_mode):
+        raise SandboxMissing(f"{name} {exe!r} is not a regular file: no execution (fail-closed)")
     if st.st_mode & 0o022:
         raise SandboxMissing(f"{name} {exe!r} is writable by group or others: no execution (fail-closed)")
     if st.st_uid != 0:
-        # explicit opt-in, never implied: QRAFT_TRUSTED_ENGINES lists exact real paths (os.pathsep-separated) of
-        # user-installed engine binaries the caller vouches for (e.g. a wasmtime unpacked in a user folder)
-        listed = [os.path.realpath(x) for x in os.environ.get("QRAFT_TRUSTED_ENGINES", "").split(os.pathsep) if x]
-        if real not in listed:
+        if real not in _vouched_paths():
             raise SandboxMissing(f"{name} {exe!r} is not owned by root or is writable by others: no execution "
-                                 f"(fail-closed; list its real path in QRAFT_TRUSTED_ENGINES to vouch for it)")
-    return exe
+                                 f"(fail-closed; list its exact real path {real!r} in QRAFT_TRUSTED_ENGINES to vouch for it)")
+        _VOUCHED[name] = real
+        return real
+    d = os.path.dirname(real)
+    while True:
+        sd = os.stat(d)
+        if sd.st_uid != 0 or sd.st_mode & 0o022:
+            raise SandboxMissing(f"{name} {real!r}: folder {d!r} is not owned by root or is writable by group or others, "
+                                 f"so the binary could be swapped after the check: no execution (fail-closed)")
+        if d == os.path.dirname(d):
+            break
+        d = os.path.dirname(d)
+    _VOUCHED.pop(name, None)
+    return real
 
 
 def _bwrap() -> str:
@@ -729,7 +753,18 @@ def select_engine(image: Optional[str] = None) -> Tuple[str, Dict[str, str]]:
 
 def run(engine: str, work: str, out_path: str, seconds: int, mem_mib: int, site_packages: List[str],
         python: Optional[str] = None, image: Optional[str] = None) -> Tuple[Optional[int], bool, str]:
-    """Runs `<work>/port_runner.py <work>` inside `engine`. Returns (return code or None, timed_out, description)."""
+    """Runs `<work>/port_runner.py <work>` inside `engine`. Returns (return code or None, timed_out, description);
+    the description names an engine binary accepted only through QRAFT_TRUSTED_ENGINES."""
+    rc, timed_out, descr = _run_engine(engine, work, out_path, seconds, mem_mib, site_packages, python, image)
+    vouched = _VOUCHED.get("wasmtime" if engine == "wasm" else engine)
+    if vouched:
+        descr += (f"; engine binary {vouched} is user-owned, accepted because QRAFT_TRUSTED_ENGINES lists it "
+                  f"(processes of this user can replace it)")
+    return rc, timed_out, descr
+
+
+def _run_engine(engine: str, work: str, out_path: str, seconds: int, mem_mib: int, site_packages: List[str],
+                python: Optional[str], image: Optional[str]) -> Tuple[Optional[int], bool, str]:
     if engine not in ENGINE_ORDER:
         raise OutOfDomain(f"engine {engine!r} not in the closed list {ENGINES}")
     stderr_path = os.path.join(work, "stderr.txt")

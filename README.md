@@ -78,8 +78,10 @@ guaranteed_levels, ...`; the Italian names of 0.2.0 are deprecated aliases that 
    with no network, a read-only file system, no real home, a minimal environment, time and memory limits and a
    fail-closed probe (an engine that is missing or does not isolate is never used silently; on Linux and macOS every
    engine binary must be owned by root and not writable by others, because the probe is measured from inside the
-   engine and a binary the user can replace could forge it; a user-installed binary only if listed in
-   `QRAFT_TRUSTED_ENGINES`). Not covered by that check: a container runtime set in the user's own podman or docker
+   engine and a binary the user can replace could forge it; the binary is run by its real path, and every folder above
+   a root-owned binary must be root-owned and not writable by group or others; a user-installed binary only if its
+   exact real path is listed in `QRAFT_TRUSTED_ENGINES`, and then `Output.sandbox` names it, because processes of
+   this user can replace it). Not covered by that check: a container runtime set in the user's own podman or docker
    configuration, the owner of the engine binary on Windows, and the AppContainer read grants (`icacls`) on the
    interpreter and site-packages folders, which stay on those folders after the run. Its JSON output is
    validated against a closed schema and each level is compared with the intervals in exact arithmetic: `INSIDE`,
@@ -135,7 +137,8 @@ Python 3.10–3.14 (python-flint 0.9.0 has wheels for these). The multiport need
 store (it is never pulled), or `sandbox-exec` (macOS), or nothing beyond Windows itself (AppContainer), or `wasmtime`
 plus a CPython built for WASI in `QRAFT_PYTHON_WASM` (pure-Python ports only: no numpy exists for WASI). On POSIX
 every engine binary must be owned by root and not writable by group or others; a binary you installed yourself (for
-example wasmtime unpacked in your home) is used only if you list its exact real path in `QRAFT_TRUSTED_ENGINES`.
+example wasmtime unpacked in your home) is used only if you list its exact real path in `QRAFT_TRUSTED_ENGINES` (an
+entry that is relative, a symlink or not normalized vouches for nothing), and `Output.sandbox` then names it.
 Not on PyPI.
 
 ```python

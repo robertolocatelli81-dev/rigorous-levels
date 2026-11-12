@@ -167,16 +167,23 @@ Not translated: test method names and test docstrings (prose, not API), kept fro
 
 ### Fixed before release (adversarial review of 0.3.0, 2026-11-12)
 
-Each fix has a test that fails on the tree before it and passes after it.
+Each code fix has a test that fails on the tree before it and passes after it, except the Windows branch of the
+root refusal (its test runs in the Windows CI job only); the `--sabotage` change is run by the Linux CI job
+(`python -m qraft_ra.reproduce --sabotage`); the CI and text items have no test.
 
 - Isolation: a user-owned `podman` placed first on PATH was chosen by `engine="auto"` and ran the port on the host
   (network reached) while the result named a container: the probe is measured from inside the engine, so a binary
   the user can replace can forge it. Every engine binary on POSIX must now be owned by root and not writable by
   group or others, as `bwrap` already had to be; a user-installed binary is used only if its exact real path is
   listed in `QRAFT_TRUSTED_ENGINES`. `sandbox-exec` and `appcontainer` refuse a readable or granted folder that is a
-  user's home, contains one, or is the root. Not covered (declared in README and docs/PORT_CONTRACT.md): a container
+  user's home, contains one, or is a root (any drive or share). Not covered (declared in README and docs/PORT_CONTRACT.md): a container
   runtime set in the user's own podman/docker configuration, the binary owner on Windows, the AppContainer grants
   that stay on the folders after the run.
+- Isolation, second pass: a `QRAFT_TRUSTED_ENGINES` entry vouches only if it is an absolute real path (a relative
+  entry was resolved from the current folder); the engine is executed by its real path (a symlink on PATH retargeted
+  after the cached probe ran an unlisted binary on the host, network reached, `Output.sandbox` naming wasm); a
+  root-owned binary in a folder that is not root-owned or is writable by group or others is refused (a hard link
+  with `fs.protected_hardlinks = 0`); a vouched binary is named in `Output.sandbox`.
 - Fluxonium: E_C = 1e17 or 2^63 made the oscillator basis grow without a cap (host out of memory); refused when
   √(2E_C/E_L) exceeds `N_LIMIT`.
 - Parameter boxes: an n_g beyond 2^53 made the candidate loop endless; the candidates are now computed in exact
@@ -185,7 +192,8 @@ Each fix has a test that fails on the tree before it and passes after it.
   margins were larger): the radius is now the larger exact distance from the float midpoint to either end.
 - Extreme inputs (1e308, 5e-324, q ≥ 1e155) in `guaranteed_levels`, `mathieu_a/b`, `Fluxonium` raised
   OverflowError; they are now refused with `OutOfDomain` and the reason. `assert_inside` with 10**400 now fails with
-  its AssertionError and the reason instead of OverflowError.
+  its AssertionError and the reason instead of OverflowError; with a unit that is not a string ([1], {}) it refuses
+  with `OutOfDomain` instead of TypeError.
 - `reproduce --sabotage` gave 0 FAIL in the fast set (swapping a_r with b_r leaves r = 0 and every odd r unchanged);
   it now makes the Mathieu solver return the next order of the sector: 2 FAIL.
 - CI: the `unittest discover` step could not fail (`> /dev/null && echo OK`); it now exits with the suite's status.

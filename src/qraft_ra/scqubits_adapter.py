@@ -276,6 +276,8 @@ def assert_inside(levels, intervals, tolerance: float = 0.0, unit: str = "GHz") 
         lev = tuple(float(x) for x in levels)
     except (TypeError, ValueError, OverflowError):
         raise AssertionError(f"levels: expected a sequence of numbers, got {type(levels).__name__}") from None
+    if not isinstance(unit, str):                     # an unhashable unit ([1], {}) raised TypeError (NEMESIS delta)
+        raise MP.OutOfDomain(f"unit: expected a string, got {type(unit).__name__}")
     out = MP.Output("numpy_rotor", "levels", lev, unit, "OK", "", 0.0, "caller")
     v = MP.compare(intervals, "GHz", out, tolerance=tolerance)
     if v.overall not in ("INSIDE", "INSIDE_TOLERANCE"):

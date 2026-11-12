@@ -91,8 +91,10 @@ required of every engine (tests `test_multiport.py`, parametrized over the engin
 libpython; never the prefix folder, never the user's home); tmpfs (256 MiB each) on /tmp, /home, /dev/shm; a
 root-owned, non-writable `bwrap` binary is required (since the review of 0.3.0 the same rule holds on POSIX for
 `podman`, `docker`, `sandbox-exec` and `wasmtime`: the probe is measured from inside the engine, so a binary the user
-can replace could forge it; a user-installed binary is accepted only if its exact real path is listed in
-`QRAFT_TRUSTED_ENGINES`, and never if group or others can write it). Not a VM: user namespaces, no seccomp.
+can replace could forge it; the binary is executed by its real path, and every folder above a root-owned binary must
+be root-owned and not writable by group or others; a user-installed binary is accepted only if its exact real path is
+listed in `QRAFT_TRUSTED_ENGINES` (relative, symlink or non-normalized entries vouch for nothing), never if group or
+others can write it, and is then named in `Output.sandbox`). Not a VM: user namespaces, no seccomp.
 
 6.2 `podman`, `docker` (Linux; macOS/Windows through their Linux container runtimes): `run --rm --network none
 --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=256M` as a non-root
@@ -120,7 +122,7 @@ PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES and no capability (no internetClient
 Object with process-memory, active-process (16) and CPU-time limits, killed on timeout (TerminateJobObject).
 The probe checks network closed, %SystemRoot% not writable, home not listable. The read-execute grants are not
 removed after the run: they stay on those folders for the AppContainer SID `qraft-ra-multiport`. Folders that are a
-user's home, contain one, or are the root are refused. The owner of the engine is not checked on Windows. Not
+user's home, contain one, or are a root (any drive or share) are refused. The owner of the engine is not checked on Windows. Not
 measured locally (CI job).
 
 6.5 `wasm` (everywhere): `wasmtime run -W max-memory-size=1 GiB -W timeout=<s> --dir <python.wasm folder>::/

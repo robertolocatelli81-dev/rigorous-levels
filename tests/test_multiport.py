@@ -518,7 +518,7 @@ class TestNemesis030EngineTrust(unittest.TestCase):
                     shutil.rmtree(d, ignore_errors=True)
             isolation.shutil.which = originale
             isolation._PROBES.clear()
-            self.assertEqual(isolation._trusted_exe("sh", "/bin/sh"), "/bin/sh")       # positive control
+            self.assertEqual(isolation._trusted_exe("sh", "/bin/sh"), os.path.realpath("/bin/sh"))   # positive control
         finally:
             isolation.shutil.which = originale
             isolation._PROBES.clear()
@@ -528,6 +528,7 @@ class TestNemesis030EngineTrust(unittest.TestCase):
     def test_trusted_engines_opt_in_is_exact_and_explicit(self):
         from qraft_ra import isolation
         d, finto = self._fake("wasmtime")
+        d, finto = os.path.realpath(d), os.path.realpath(finto)                   # macOS: /var -> /private/var
         vecchio = os.environ.pop("QRAFT_TRUSTED_ENGINES", None)
         try:
             with self.assertRaises(MP.SandboxMissing):                                   # not listed: refused
@@ -545,6 +546,102 @@ class TestNemesis030EngineTrust(unittest.TestCase):
             os.environ.pop("QRAFT_TRUSTED_ENGINES", None)
             if vecchio is not None:
                 os.environ["QRAFT_TRUSTED_ENGINES"] = vecchio
+            shutil.rmtree(d, ignore_errors=True)
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "getuid") and os.getuid() != 0, "POSIX, non-root")
+    def test_trusted_engines_entry_must_be_the_exact_real_path(self):
+        from qraft_ra import isolation
+        d, finto = self._fake("wasmtime")
+        d, finto = os.path.realpath(d), os.path.realpath(finto)
+        link = os.path.join(d, "collegamento")
+        os.symlink(finto, link)
+        vecchio, cwd = os.environ.pop("QRAFT_TRUSTED_ENGINES", None), os.getcwd()
+        try:
+            os.chdir(d)
+            for voce in ("wasmtime", "./wasmtime", link, finto + "/", " " + finto, d + "/../" + os.path.basename(d) + "/wasmtime"):
+                os.environ["QRAFT_TRUSTED_ENGINES"] = voce
+                with self.assertRaises(MP.SandboxMissing, msg=repr(voce)):
+                    isolation._trusted_exe("wasmtime", finto)
+            os.environ["QRAFT_TRUSTED_ENGINES"] = finto
+            self.assertEqual(isolation._trusted_exe("wasmtime", link), finto)     # the real path is what runs
+            self.assertEqual(isolation._VOUCHED.get("wasmtime"), finto)
+        finally:
+            os.chdir(cwd)
+            os.environ.pop("QRAFT_TRUSTED_ENGINES", None)
+            isolation._VOUCHED.pop("wasmtime", None)
+            if vecchio is not None:
+                os.environ["QRAFT_TRUSTED_ENGINES"] = vecchio
+            shutil.rmtree(d, ignore_errors=True)
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "getuid") and os.getuid() != 0, "POSIX, non-root")
+    def test_root_engine_runs_by_its_real_path_and_folder_must_be_root_owned(self):
+        from qraft_ra import isolation
+        sh = os.path.realpath("/bin/sh")
+        if os.stat(sh).st_uid != 0:
+            self.skipTest("/bin/sh not owned by root")
+        d = tempfile.mkdtemp(prefix="finto_link_")
+        try:
+            os.symlink(sh, os.path.join(d, "podman"))       # a symlink the user can retarget after the check
+            self.assertEqual(isolation._trusted_exe("podman", os.path.join(d, "podman")), sh)
+            try:
+                os.link(sh, os.path.join(d, "docker"))     # hard link: root-owned file in a user folder
+            except OSError:
+                return                                      # fs.protected_hardlinks = 1: not possible here
+            with self.assertRaises(MP.SandboxMissing) as cm:
+                isolation._trusted_exe("docker", os.path.join(d, "docker"))
+            self.assertIn("could be swapped", str(cm.exception))
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        # a root-owned folder writable by others (as /tmp): simulated, a hard link there could not be removed (sticky)
+        real_stat = os.stat
+        def fake_stat(p, *a, **k):
+            st = real_stat(p, *a, **k)
+            if p == os.path.dirname(sh):
+                return os.stat_result((st.st_mode | 0o002,) + tuple(st)[1:])
+            return st
+        def user_stat(p, *a, **k):                     # a folder owned by the user, mode 0755, above a root binary
+            st = real_stat(p, *a, **k)
+            if p == os.path.dirname(sh):
+                return os.stat_result((st.st_mode & ~0o022, st.st_ino, st.st_dev, st.st_nlink, 1000) + tuple(st)[5:])
+            return st
+        from unittest import mock
+        for fs in (fake_stat, user_stat):
+            with mock.patch.object(isolation.os, "stat", fs):
+                with self.assertRaises(MP.SandboxMissing):
+                    isolation._trusted_exe("podman", sh)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX")
+    def test_engine_must_be_a_regular_file_and_root_clears_a_stale_vouch(self):
+        from qraft_ra import isolation
+        with self.assertRaises(MP.SandboxMissing):
+            isolation._trusted_exe("podman", "/usr/bin")              # a root-owned folder is not an engine
+        isolation._VOUCHED["sh"] = "/x/sh"
+        isolation._trusted_exe("sh", "/bin/sh")
+        self.assertNotIn("sh", isolation._VOUCHED)
+
+    def test_vouched_engine_named_in_the_description(self):
+        from qraft_ra import isolation
+        originale = isolation._run_engine
+        try:
+            isolation._run_engine = lambda *a, **k: (0, False, "wasmtime (WASI)")
+            isolation._VOUCHED["wasmtime"] = "/x/wasmtime"
+            self.assertIn("QRAFT_TRUSTED_ENGINES lists it", isolation.run("wasm", "w", "o", 1, 1, [])[2])
+            isolation._VOUCHED.pop("wasmtime")
+            self.assertEqual(isolation.run("wasm", "w", "o", 1, 1, [])[2], "wasmtime (WASI)")
+        finally:
+            isolation._run_engine = originale
+            isolation._VOUCHED.pop("wasmtime", None)
+
+    def test_any_root_refused_for_grants(self):
+        from qraft_ra import isolation
+        roots = [os.path.abspath(os.sep)] + (["Q:\\", "\\\\server\\share\\"] if os.name == "nt" else [])
+        for p in roots:                       # Windows: a drive other than the current one was not refused
+            with self.assertRaises(MP.OutOfDomain, msg=p):
+                isolation._refuse_home_or_ancestor(p, "appcontainer")
+        d = tempfile.mkdtemp(prefix="non_radice_")
+        try:
+            isolation._refuse_home_or_ancestor(d, "appcontainer")                      # positive control: allowed
+        finally:
             shutil.rmtree(d, ignore_errors=True)
 
     def test_seatbelt_profile_refuses_a_home_prefix(self):

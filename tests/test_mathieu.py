@@ -173,3 +173,12 @@ class TestNemesis030ExtremeInputs(unittest.TestCase):
             with self.assertRaises(M.OutOfDomain):
                 call()
         self.assertEqual(M.mathieu_a(1, 1e8).state, "GUARANTEED")                                  # positive control
+
+    def test_assert_inside_unit_not_a_string_refused(self):
+        from qraft_ra.scqubits_adapter import assert_inside
+        iv = guaranteed_levels(Rotor.transmon(0.3, 15.0, n_g=0.25), 2)
+        lev = [float(iv.low[0]), float(iv.low[1])]
+        for u in ([1], {}, 1, None):          # [1] and {} raised TypeError (unhashable) before the delta review
+            with self.assertRaises(M.OutOfDomain):
+                assert_inside(lev, iv, unit=u)
+        assert_inside(lev, iv, unit="GHz")    # positive control: passes
