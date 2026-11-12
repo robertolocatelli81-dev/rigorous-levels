@@ -77,6 +77,16 @@ def _inside(p: str, folder: str) -> bool:
     return p == folder or p.startswith(folder.rstrip("/\\") + os.sep) or p.startswith(folder.rstrip("/\\") + "/")
 
 
+def _refuse_home_or_ancestor(p: str, engine: str) -> None:
+    """A folder re-allowed (sandbox-exec) or granted (appcontainer) must not be «/», a user's home or an ancestor of
+    one: with an interpreter prefix equal to the home (python built with --prefix=$HOME, ~/bin/python3) the whole home
+    would become readable, the case interpreter_pieces() already refuses for bwrap."""
+    real = os.path.realpath(p)
+    for home in _user_homes():
+        if _inside(home, real) or real in ("/", os.path.abspath(os.sep)):
+            raise OutOfDomain(f"{engine}: {p!r} contains the user's home {home!r}: refused")
+
+
 def _run(cmd: List[str], timeout: float, stderr_path: str, env: Dict[str, str]) -> Tuple[Optional[int], bool]:
     """stdout discarded and stderr to a file: an unbounded stream never enters the memory of the trusted side."""
     try:
@@ -89,14 +99,31 @@ def _run(cmd: List[str], timeout: float, stderr_path: str, env: Dict[str, str]) 
 
 
 # ── bwrap (Linux) ──────────────────────────────────────────────────────────────────────────────────────────────────
+def _trusted_exe(name: str, exe: str) -> str:
+    """The engine executable must not be replaceable by this user: on POSIX owned by root and not writable by group or
+    others (a user-owned «podman», «docker», «bwrap» or «wasmtime» on PATH could run the port without isolation and
+    forge the probe, which is measured from INSIDE the engine). Windows has no owner uid here: not checked."""
+    if os.name != "posix":
+        return exe
+    real = os.path.realpath(exe)
+    st = os.stat(real)
+    if st.st_mode & 0o022:
+        raise SandboxMissing(f"{name} {exe!r} is writable by group or others: no execution (fail-closed)")
+    if st.st_uid != 0:
+        # explicit opt-in, never implied: QRAFT_TRUSTED_ENGINES lists exact real paths (os.pathsep-separated) of
+        # user-installed engine binaries the caller vouches for (e.g. a wasmtime unpacked in a user folder)
+        listed = [os.path.realpath(x) for x in os.environ.get("QRAFT_TRUSTED_ENGINES", "").split(os.pathsep) if x]
+        if real not in listed:
+            raise SandboxMissing(f"{name} {exe!r} is not owned by root or is writable by others: no execution "
+                                 f"(fail-closed; list its real path in QRAFT_TRUSTED_ENGINES to vouch for it)")
+    return exe
+
+
 def _bwrap() -> str:
     b = shutil.which("bwrap")
     if b is None:
         raise SandboxMissing("bwrap (bubblewrap) not found: no execution of external code (fail-closed)")
-    st = os.stat(os.path.realpath(b))
-    if st.st_uid != 0 or st.st_mode & 0o022:          # a user-writable «bwrap» on PATH is not a sandbox
-        raise SandboxMissing(f"bwrap {b!r} is not owned by root or is writable by others: no execution (fail-closed)")
-    return b
+    return _trusted_exe("bwrap", b)
 
 
 def interpreter_pieces(python: str) -> Tuple[str, ...]:
@@ -192,7 +219,7 @@ def _container_exe(engine: str) -> str:
     exe = shutil.which(engine)
     if exe is None:
         raise SandboxMissing(f"{engine} not found: no execution of external code (fail-closed)")
-    return exe
+    return _trusted_exe(engine, exe)
 
 
 def _container_cmd(engine: str, exe: str, image: str, name: str, seconds: int, mounts_ro: List[str], work: str,
@@ -298,7 +325,7 @@ def _sandbox_exec() -> str:
     exe = shutil.which("sandbox-exec")
     if exe is None or sys.platform != "darwin":
         raise SandboxMissing("sandbox-exec not found (macOS only): no execution of external code (fail-closed)")
-    return exe
+    return _trusted_exe("sandbox-exec", exe)
 
 
 def _sb_literal(p: str) -> str:
@@ -317,6 +344,7 @@ def seatbelt_profile(python: str, readable: List[str], out_path: str, scratch: s
     for home in _user_homes():
         lines.append(f"(deny file-read* (subpath {_sb_literal(home)}))")
     for p in readable:                                   # later rules win: the declared pieces inside a home
+        _refuse_home_or_ancestor(p, "sandbox-exec")
         lines.append(f"(allow file-read* (subpath {_sb_literal(os.path.realpath(p))}))")
     lines.append(f"(allow file-write* (literal {_sb_literal(os.path.realpath(out_path))}))")
     lines.append(f"(allow file-write* (subpath {_sb_literal(os.path.realpath(scratch))}))")
@@ -516,6 +544,7 @@ def _probe_appcontainer() -> Dict[str, object]:
     scratch = tempfile.mkdtemp(prefix="qraft_ac_")
     try:
         for p in (sys.base_prefix, sys.prefix):
+            _refuse_home_or_ancestor(p, "appcontainer")
             _icacls(p, sid_str, "RX")
         _icacls(scratch, sid_str, "M")
         probe = os.path.join(scratch, "probe.py")
@@ -559,6 +588,7 @@ def _run_appcontainer(work: str, out_path: str, seconds: int, mem_mib: int, site
     sid, sid_str = _appcontainer_sid(ctypes, wintypes, "qraft-ra-multiport")
     python = os.path.realpath(python or sys.executable)
     for p in [os.path.dirname(os.path.dirname(python)), *site_packages, work]:
+        _refuse_home_or_ancestor(p, "appcontainer")
         _icacls(p, sid_str, "RX")
     _icacls(out_path, sid_str, "M")
     scratch = tempfile.mkdtemp(prefix="qraft_ac_")
@@ -582,6 +612,7 @@ def _wasm_parts() -> Tuple[str, str]:
     exe = shutil.which("wasmtime")
     if exe is None:
         raise SandboxMissing("wasmtime not found: no execution of external code (fail-closed)")
+    exe = _trusted_exe("wasmtime", exe)
     folder = os.environ.get("QRAFT_PYTHON_WASM", "")
     if not folder or not os.path.isfile(os.path.join(folder, "python.wasm")) or not os.path.isdir(os.path.join(folder, "lib")):
         raise SandboxMissing("QRAFT_PYTHON_WASM must point to a folder with python.wasm and lib/ (a CPython WASI build)")

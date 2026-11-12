@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/multiport.py — MULTIPORT: a closed, versioned interface ("qraft-port/0.2", docs/PORT_CONTRACT.md) through
+"""qraft_ra/multiport.py — MULTIPORT: a closed, versioned interface ("qraft-port/0.3", docs/PORT_CONTRACT.md) through
 which an EXTERNAL solver runs inside a sandbox and its result is compared with the guaranteed intervals.
 
 Other people's code is untrusted by construction: it runs in a separate process inside one of the declared ISOLATION

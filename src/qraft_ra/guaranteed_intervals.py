@@ -311,6 +311,21 @@ def _decimal(f: Fraction, verso_alto: bool) -> str:
     return format(v, "e") if v != 0 else "0"
 
 
+def _refuse_overflow(fn):
+    """Public entry points: an OverflowError from a float conversion of an extreme input (1e308, 5e-324, ...) is a
+    refusal with the reason (OutOfDomain), never a crash (NEMESIS 0.3.0: E_C = 1e308 crashed guaranteed_levels)."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except OverflowError as e:
+            raise OutOfDomain(f"a parameter or an intermediate value is beyond the float64 range ({e})") from None
+    return wrapper
+
+
+@_refuse_overflow
 def guaranteed_levels(r, k: int = 6, width: float = 1e-12, *, deadline: Optional[float] = None,
                       N_initial: Optional[int] = None, N_limit: int = N_LIMIT, prec: int = PREC_MIN) -> Intervals:
     """First k levels of H as guaranteed intervals. `width` is the target width (GHz, or the unit of E_C);

@@ -163,3 +163,21 @@ class TestClosedInputs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(FLINT, "python-flint absent")
+class TestNemesis030ExtremeInputs(unittest.TestCase):
+    """NEMESIS 0.3.0: E_C = 1e17 or 2**63 grew the outer block N2 = 2.5·√(φ²N) without a cap (MemoryError under a
+    4 GB ulimit, OOM kill of the host without it); E_C = 1e308 and E_L = 5e-324 crashed with OverflowError. All are
+    refusals with the reason now, in seconds."""
+
+    def test_extreme_parameters_refused_quickly(self):
+        import time
+        for args in ((1e17, 3.0, 0.5), (2 ** 63, 3.0, 0.5), (1e308, 3.0, 0.5), (0.5, 3.0, 5e-324), (0.5, 1e308, 0.5),
+                     (1e308, 3.0, 1e308), (1e3, 3.0, 1e-3)):
+            t0 = time.time()
+            with self.assertRaises((F.OutOfDomain, F.DeadlineExceeded), msg=args):
+                F.guaranteed_fluxonium_levels(F.Fluxonium(*args), 2, 1e-6, deadline=10)
+            self.assertLess(time.time() - t0, 20, args)
+        iv = F.guaranteed_fluxonium_levels(F.Fluxonium(0.5, 3.0, 0.5, 0.25), 2, 1e-6)          # positive control
+        self.assertEqual(iv.state, "GUARANTEED")

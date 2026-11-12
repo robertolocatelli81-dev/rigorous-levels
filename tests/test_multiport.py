@@ -486,6 +486,78 @@ class TestNemesis20261111(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
 
 
+class TestNemesis030EngineTrust(unittest.TestCase):
+    """NEMESIS 0.3.0: a user-owned «podman» first on PATH was chosen by engine="auto" and ran the port without
+    isolation (network REACHED, Output.sandbox "podman run --network none ..."): the probe is measured from inside
+    the engine, so an engine binary the user can replace forges it. Same rule as bwrap for every engine binary."""
+
+    def _fake(self, name):
+        d = tempfile.mkdtemp(prefix="finto_" + name + "_")
+        finto = os.path.join(d, name)
+        with open(finto, "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(finto, 0o755)
+        return d, finto
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "getuid") and os.getuid() != 0, "POSIX, non-root")
+    def test_user_owned_engine_binaries_refused(self):
+        from qraft_ra import isolation
+        originale, probes = isolation.shutil.which, dict(isolation._PROBES)
+        try:
+            for engine, call in (("podman", lambda: isolation.probe("podman")),
+                                 ("docker", lambda: isolation.probe("docker")),
+                                 ("wasmtime", lambda: isolation._wasm_parts())):
+                d, finto = self._fake(engine)
+                isolation.shutil.which = lambda name, f=finto: f
+                isolation._PROBES.clear()
+                try:
+                    with self.assertRaises(MP.SandboxMissing, msg=engine) as cm:
+                        call()
+                    self.assertIn("not owned by root", str(cm.exception))
+                finally:
+                    shutil.rmtree(d, ignore_errors=True)
+            isolation.shutil.which = originale
+            isolation._PROBES.clear()
+            self.assertEqual(isolation._trusted_exe("sh", "/bin/sh"), "/bin/sh")       # positive control
+        finally:
+            isolation.shutil.which = originale
+            isolation._PROBES.clear()
+            isolation._PROBES.update(probes)
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "getuid") and os.getuid() != 0, "POSIX, non-root")
+    def test_trusted_engines_opt_in_is_exact_and_explicit(self):
+        from qraft_ra import isolation
+        d, finto = self._fake("wasmtime")
+        vecchio = os.environ.pop("QRAFT_TRUSTED_ENGINES", None)
+        try:
+            with self.assertRaises(MP.SandboxMissing):                                   # not listed: refused
+                isolation._trusted_exe("wasmtime", finto)
+            os.environ["QRAFT_TRUSTED_ENGINES"] = os.path.join(d, "altro") + os.pathsep + d   # folder, not the file
+            with self.assertRaises(MP.SandboxMissing):
+                isolation._trusted_exe("wasmtime", finto)
+            os.environ["QRAFT_TRUSTED_ENGINES"] = finto                                    # exact path: accepted
+            self.assertEqual(isolation._trusted_exe("wasmtime", finto), finto)
+            os.chmod(finto, 0o775)                                                         # group-writable: refused
+            with self.assertRaises(MP.SandboxMissing) as cm:
+                isolation._trusted_exe("wasmtime", finto)
+            self.assertIn("writable by group or others", str(cm.exception))
+        finally:
+            os.environ.pop("QRAFT_TRUSTED_ENGINES", None)
+            if vecchio is not None:
+                os.environ["QRAFT_TRUSTED_ENGINES"] = vecchio
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_seatbelt_profile_refuses_a_home_prefix(self):
+        from qraft_ra import isolation
+        home = isolation._user_homes()[0]
+        with self.assertRaises(MP.OutOfDomain):
+            isolation.seatbelt_profile(os.path.join(home, "bin", "python3"), [home], "/tmp/x/output.json", "/tmp/x")
+        with self.assertRaises(MP.OutOfDomain):
+            isolation.seatbelt_profile("/usr/bin/python3", ["/"], "/tmp/x/output.json", "/tmp/x")
+        prof = isolation.seatbelt_profile("/usr/bin/python3", [os.path.join(home, "venv", "lib")], "/tmp/x/o.json", "/tmp/x")
+        self.assertIn("(deny file-read* (subpath", prof)                                  # positive control
+
+
 class TestBersagliTroncamentoChiuso(unittest.TestCase):
     """NEMESIS 11/11: le porte dei bersagli accettavano chiavi ignote, 15.9 e "15" nel truncation (int() nel runner)."""
     ROT = {"type": "cos_rotor", "E_C": 0.2, "E_J": 10.0, "n_g": 0.0}

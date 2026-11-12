@@ -157,3 +157,19 @@ class TestClosedInputs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(FLINT, "python-flint absent")
+class TestNemesis030ExtremeInputs(unittest.TestCase):
+    """NEMESIS 0.3.0: q ≥ 1e155 (q² beyond float64) and width = 1e308 crashed with OverflowError; E_C = 1e308 crashed
+    guaranteed_levels. Refusals now."""
+
+    def test_extreme_floats_refused(self):
+        for call in (lambda: M.mathieu_a(1, 1e308), lambda: M.mathieu_a(1, -1e308), lambda: M.mathieu_b(3, 1e155),
+                     lambda: M.mathieu_a(2, 1.0, width=1e308),
+                     lambda: guaranteed_levels(Rotor.transmon(1e308, 15.0), 2),
+                     lambda: guaranteed_levels(Rotor.transmon(5e-324, 15.0), 2),
+                     lambda: guaranteed_levels(Rotor.transmon(0.3, 1e308), 2)):
+            with self.assertRaises(M.OutOfDomain):
+                call()
+        self.assertEqual(M.mathieu_a(1, 1e8).state, "GUARANTEED")                                  # positive control

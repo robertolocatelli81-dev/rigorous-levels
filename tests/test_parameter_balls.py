@@ -81,10 +81,46 @@ class TestChargeOffsetInterval(unittest.TestCase):
     def test_candidates(self):
         self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(0.1, 0.3)).n_g_candidates(), (0.1, 0.3))
         self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(0.3, 0.6)).n_g_candidates(), (0.3, 0.5, 0.6))
-        self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(-0.2, 0.2)).n_g_candidates(), (-0.2, 0.0, 0.2))
-        self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(0.9, 1.6)).n_g_candidates(), (0.9, 1.0, 1.5, 1.6))
+        self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(-0.2, 0.2)).n_g_candidates(), (0.0, 0.2))      # even: folded onto [0, 0.2]
+        self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(0.9, 1.6)).n_g_candidates(), (0.0, 0.5, 1.6 - 1, 0.9))   # mod 1, exact
         self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(0.0, 1.0)).n_g_candidates(), (0.0, 0.5))
         self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=0.25).n_g_candidates(), (0.25,))
+
+    def test_candidates_far_from_zero_are_exact_and_finite(self):
+        """NEMESIS 0.3.0: n_g beyond 2^53 made the float loop endless (x + 1.0 == x); now exact and reduced mod 1."""
+        import signal
+        def boom(*a):
+            raise TimeoutError("n_g_candidates did not return")
+        old = signal.signal(signal.SIGALRM, boom)
+        signal.alarm(5)
+        try:
+            self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(1e17, 1e17)).n_g_candidates(), (0.0,))
+            self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(2.0 ** 60, 2.0 ** 60 + 256)).n_g_candidates(), (0.0, 0.5))
+            self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(1e6 + 0.25, 1e6 + 0.75)).n_g_candidates(),
+                             (0.25, 0.5, 0.75))
+            self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(-0.75, -0.25)).n_g_candidates(), (0.25, 0.5, 0.75))
+            self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(-0.3, 0.6)).n_g_candidates(), (0.0, 0.5, 0.6))
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old)
+        far = guaranteed_levels_over_box(RotorBall.transmon(0.3, 15.0, n_g=(1e6 + 0.25, 1e6 + 0.25)), 2)
+        near = guaranteed_levels_over_box(RotorBall.transmon(0.3, 15.0, n_g=0.25), 2)
+        self.assertEqual((far.low, far.high), (near.low, near.high))
+
+    def test_rho_covers_the_box_with_the_float_midpoint(self):
+        """NEMESIS 0.3.0: the midpoint (lo + hi)/2 is rounded; ρ = Σ(hi − lo)/2 then missed one end by up to half an
+        ulp (49 914 of 100 000 random boxes). ρ is now measured from the midpoint actually used."""
+        import random
+        from fractions import Fraction
+        rnd = random.Random(1)
+        for _ in range(2000):
+            lo = -rnd.uniform(1, 50)
+            hi = lo + rnd.uniform(0, 1) * abs(lo) * rnd.choice([1e-2, 1e-8, 1e-15])
+            b = RotorBall.transmon(0.3, (-hi, -lo))
+            (l, h), = b.cosines.values()
+            c0 = Fraction(b.midpoint_rotor(0.3, 0.0).cosines[0][1])
+            self.assertLessEqual(c0 - b.rho, Fraction(l))
+            self.assertGreaterEqual(c0 + b.rho, Fraction(h))
 
     def test_fine_sampling_inside_and_a_point_outside(self):
         import numpy as np

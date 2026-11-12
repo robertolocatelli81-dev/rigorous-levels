@@ -42,7 +42,7 @@ from typing import Optional, Tuple
 import numpy as np
 from scipy.linalg import eigvalsh_tridiagonal
 
-from qraft_ra.guaranteed_intervals import ArbMissing, DeadlineExceeded, OutOfDomain, _finite, _flint
+from qraft_ra.guaranteed_intervals import ArbMissing, DeadlineExceeded, OutOfDomain, _finite, _flint, _refuse_overflow
 from qraft_ra.spherical_rotor import _ball, _count_below
 
 __all__ = ["MathieuValue", "mathieu_value", "mathieu_a", "mathieu_b", "sector", "OutOfDomain", "ArbMissing",
@@ -153,6 +153,7 @@ def _attempt(fl, kind: str, nu: int, k0: int, n: int, q: Fraction, K: int, width
     return lo, hi, float(eta)
 
 
+@_refuse_overflow
 def mathieu_value(kind: str, r: int, q, width: float = 1e-12, *, deadline: Optional[float] = None,
                   K_initial: Optional[int] = None, K_limit: int = K_LIMIT, prec: int = PREC_MIN) -> MathieuValue:
     """a_r(q) (kind "a") or b_r(q) (kind "b") as a guaranteed interval; `width` is relative to max(|a|, 1)."""

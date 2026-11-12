@@ -89,7 +89,10 @@ required of every engine (tests `test_multiport.py`, parametrized over the engin
 6.1 `bwrap` (Linux): `--unshare-all --die-with-parent --new-session --clearenv`; read-only binds of /usr, /lib,
 /lib64, /bin, /etc, the declared site-packages and the pieces of an interpreter outside /usr (executable, stdlib,
 libpython; never the prefix folder, never the user's home); tmpfs (256 MiB each) on /tmp, /home, /dev/shm; a
-root-owned, non-writable `bwrap` binary is required. Not a VM: user namespaces, no seccomp.
+root-owned, non-writable `bwrap` binary is required (since the review of 0.3.0 the same rule holds on POSIX for
+`podman`, `docker`, `sandbox-exec` and `wasmtime`: the probe is measured from inside the engine, so a binary the user
+can replace could forge it; a user-installed binary is accepted only if its exact real path is listed in
+`QRAFT_TRUSTED_ENGINES`, and never if group or others can write it). Not a VM: user namespaces, no seccomp.
 
 6.2 `podman`, `docker` (Linux; macOS/Windows through their Linux container runtimes): `run --rm --network none
 --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=256M` as a non-root
@@ -115,7 +118,10 @@ exists); read-execute grants (`icacls … /grant *<SID>:(OI)(CI)RX`) on the inte
 the work folder, modify on the output file and a scratch folder; the runner started with
 PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES and no capability (no internetClient: no network), assigned to a Job
 Object with process-memory, active-process (16) and CPU-time limits, killed on timeout (TerminateJobObject).
-The probe checks network closed, %SystemRoot% not writable, home not listable. Not measured locally (CI job).
+The probe checks network closed, %SystemRoot% not writable, home not listable. The read-execute grants are not
+removed after the run: they stay on those folders for the AppContainer SID `qraft-ra-multiport`. Folders that are a
+user's home, contain one, or are the root are refused. The owner of the engine is not checked on Windows. Not
+measured locally (CI job).
 
 6.5 `wasm` (everywhere): `wasmtime run -W max-memory-size=1 GiB -W timeout=<s> --dir <python.wasm folder>::/
 --dir <work>::/work --dir <output folder>::/out` with a CPython built for WASI (`QRAFT_PYTHON_WASM`, required

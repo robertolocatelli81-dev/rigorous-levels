@@ -274,7 +274,7 @@ def assert_inside(levels, intervals, tolerance: float = 0.0, unit: str = "GHz") 
     from qraft_ra import multiport as MP
     try:
         lev = tuple(float(x) for x in levels)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise AssertionError(f"levels: expected a sequence of numbers, got {type(levels).__name__}") from None
     out = MP.Output("numpy_rotor", "levels", lev, unit, "OK", "", 0.0, "caller")
     v = MP.compare(intervals, "GHz", out, tolerance=tolerance)

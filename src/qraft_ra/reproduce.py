@@ -247,7 +247,9 @@ def main(argv) -> int:
     if sabotage:
         import qraft_ra.mathieu as M
         original = M.sector
-        M.sector = lambda kind, r: original("b" if kind == "a" and r > 0 else kind, r)   # wrong sector for a_r
+        # the NEXT eigenvalue of the right sector (the scipy defect: another order): it changes every a_r and b_r,
+        # so the fast set fails too (the old swap a_r -> b_r left r = 0 and every odd r unchanged: 0 FAIL, exit 1)
+        M.sector = lambda kind, r: (lambda t: (t[0], t[1], t[2] + 1))(original(kind, r))
     failed = 0
     t0 = time.perf_counter()
     for name, published, fn, slow in CLAIMS:
@@ -268,7 +270,7 @@ def main(argv) -> int:
         print(f"[{'PASS' if ok else 'FAIL'}] {name} -> {text} ({dt:.1f} s)")
     print(f"{'FAILED' if failed else 'OK'}: {failed} of {len(CLAIMS)} claims failed, {time.perf_counter() - t0:.1f} s")
     if sabotage:
-        print("(sabotage: the Mathieu sector of a_r was swapped; at least one FAIL above is the positive control)")
+        print("(sabotage: the Mathieu solver returns the next order of the sector; at least one FAIL above is the positive control)")
         return 0 if failed else 1
     return 1 if failed else 0
 

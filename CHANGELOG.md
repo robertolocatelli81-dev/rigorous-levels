@@ -2,7 +2,7 @@
 
 All dates are from the author's system clock (Europe/Rome). Nothing here is published yet: no release, no PyPI.
 
-## 0.3.0 — 2026-11-11 (local, unreleased; branch fable-0.3 from 7beff99)
+## 0.3.0 — 2026-11-11 (local, unreleased; branch dev-0.3 from 7beff99)
 
 Four limits of 0.2.0 were named by the author on 2026-11-11 and are closed or narrowed here (measurements in
 README "Measurements" and in the author's report; every number re-measured on this tree, dates and versions stated).
@@ -56,7 +56,8 @@ The Italian modules remain as deprecated aliases (`qraft_ra._compat`): importing
 DeprecationWarning that names the replacement; keyword arguments are translated; the fields of the results have
 Italian read-only aliases; `tests/test_deprecated_aliases.py` measures that the old names work and that the
 English API is warning-free under `-W error::DeprecationWarning`.
-Formats on disk changed with a new version declared first: the port contract is "qraft-port/0.2"
+Formats on disk changed with a new version declared first: the port contract is "qraft-port/0.2" (then
+"qraft-port/0.3" with the batches of §8, the one accepted by 0.3.0)
 (`docs/PORT_CONTRACT.md`, English keys, port names `numpy_rotor`, `test_*`, model types `cos_rotor`,
 `sigma_molecule`; "qraft-porta/0.1" is refused); the threshold rule is "scq-threshold/1.0"
 (`docs/THRESHOLD_RULE.md`, same content as "soglia-scq/1.0").
@@ -94,12 +95,12 @@ Not translated: test method names and test docstrings (prose, not API), kept fro
   with constant Σ|Δc_m|, Weyl), docs/PROOF.md. Measured 2026-11-11 (`bench/parameter_balls.py`): 200 transmons of
   the device regime with E_C, E_J ± 1 %, 6 levels, 5 inner points each: 0 of 1000 inner point intervals outside the
   box interval; a point with E_J 3 % above the box detected outside in 187 of 200; box width 2.1× the observed
-  spread (median; max 5.5×: the Lipschitz bound is rigorous, not tight); 0.11 s per box. n_g as an interval: 0.4.
+  spread (median; max 5.5×: the Lipschitz bound is rigorous, not tight); 0.11 s per box. n_g as an interval: see below.
 - `scqubits_adapter.guaranteed_from_scqubits`: from a `scqubits.Transmon` or `Fluxonium` object, the guaranteed
   intervals of its H and the verdict (`INSIDE` / `INSIDE_TOLERANCE` / `OUTSIDE` per level, tolerance 32·eps·‖H‖) on
   its own `eigenvals()` at its own cutoff; closed list of classes, read by name and attributes.
 - The public API is exposed at the package level (`from qraft_ra import Rotor, guaranteed_levels, ...`, `__all__`).
-- `examples/` (three scripts run by `tests/test_examples.py` in a fresh interpreter), `CITATION.cff`,
+- `examples/` (five scripts run by `tests/test_examples.py` in a fresh interpreter), `CITATION.cff`,
   `bench/compare_tools.py` (time per point against scqubits, scipy, numpy: the other tools are 37–340× faster on
   the inputs of the README table).
 
@@ -114,7 +115,8 @@ Not translated: test method names and test docstrings (prose, not API), kept fro
 - `fluxonium`: H = 4E_C n² + (E_L/2)φ² − E_J cos(φ − 2π·flux) in the oscillator basis with the truncation closed by
   a per-site lower bound (Young on every coupling pair, DLMF 18.14.8 tails on the Laguerre couplings) and dense LDLᵀ
   counts in Arb. Measured 2026-11-11 against scqubits 4.3.1 `Fluxonium`: cutoff 110 inside the intervals in every
-  level of 4 published parameter sets × 3 flux points, cutoff 6 outside in at least one (negative control); width
+  level of 4 published parameter sets at flux ½ (`bench/fluxonium_devices.py`) and of 2 of them at flux 0, ¼, ½
+  (`tests/test_fluxonium.py`), cutoff 6 outside in at least one (negative control); width
   5e-10 GHz, 0.4–6.5 s per device (N = 54…117). Published devices (parameters as printed, one-mode model): Zhang et
   al. 2021 f01 = 13.8816 MHz guaranteed vs 14 MHz measured; Moskalenko et al. 2022 qubit A f01 = 685.731 MHz vs
   688.224, f12 = 1831.204 MHz vs 1832 (shifts reported, not judged: two-mode fit, printed rounding).
@@ -132,7 +134,8 @@ Not translated: test method names and test docstrings (prose, not API), kept fro
   numpy's `eigvalsh` within 1e-11 GHz.
 - `python -m qraft_ra.reproduce`: re-measures the numerical claims of the README offline (one [PASS]/[FAIL] line per
   claim with the measured and the published value; fast set 22 s, `--full` adds the 40 025-value Mathieu grid and the
-  200 wide-range transmons, 108 s); `--sabotage` swaps the Mathieu sector as a positive control (at least one FAIL);
+  200 wide-range transmons, 108 s); `--sabotage` makes the Mathieu solver return the next order of the sector as a positive control (at least one
+  FAIL; the first version swapped a_r with b_r, which left r = 0 and every odd r unchanged: 0 FAIL in the fast set);
   `--readme` checks that every published value appears verbatim in README.md and is run by `check_tree.py` (a number
   edited by hand fails the tree check: positive control included); `--hash` prints the sha256 of a fixed set of
   exact enclosures: identical on Python 3.11 (numpy 2.4.6, scipy 1.17.1), 3.12, 3.13 and 3.14 (numpy 2.5.4, scipy
@@ -161,6 +164,33 @@ Not translated: test method names and test docstrings (prose, not API), kept fro
 - `guaranteed_intervals.Intervals.contains(j, value)` (was `valore`); `rotor_spectrum.spectrum` checks that its
   first argument is a `Rotor`.
 - `check_tree.py`: unchanged rules; `FILE_LIST.tsv` lists the new files.
+
+### Fixed before release (adversarial review of 0.3.0, 2026-11-12)
+
+Each fix has a test that fails on the tree before it and passes after it.
+
+- Isolation: a user-owned `podman` placed first on PATH was chosen by `engine="auto"` and ran the port on the host
+  (network reached) while the result named a container: the probe is measured from inside the engine, so a binary
+  the user can replace can forge it. Every engine binary on POSIX must now be owned by root and not writable by
+  group or others, as `bwrap` already had to be; a user-installed binary is used only if its exact real path is
+  listed in `QRAFT_TRUSTED_ENGINES`. `sandbox-exec` and `appcontainer` refuse a readable or granted folder that is a
+  user's home, contains one, or is the root. Not covered (declared in README and docs/PORT_CONTRACT.md): a container
+  runtime set in the user's own podman/docker configuration, the binary owner on Windows, the AppContainer grants
+  that stay on the folders after the run.
+- Fluxonium: E_C = 1e17 or 2^63 made the oscillator basis grow without a cap (host out of memory); refused when
+  √(2E_C/E_L) exceeds `N_LIMIT`.
+- Parameter boxes: an n_g beyond 2^53 made the candidate loop endless; the candidates are now computed in exact
+  arithmetic. The Lipschitz radius used the exact half-width around a float midpoint that can be rounded (one end
+  uncovered by up to 8.9e-16 in 49 914 of 100 000 random boxes; no value was observed outside, the computation
+  margins were larger): the radius is now the larger exact distance from the float midpoint to either end.
+- Extreme inputs (1e308, 5e-324, q ≥ 1e155) in `guaranteed_levels`, `mathieu_a/b`, `Fluxonium` raised
+  OverflowError; they are now refused with `OutOfDomain` and the reason. `assert_inside` with 10**400 now fails with
+  its AssertionError and the reason instead of OverflowError.
+- `reproduce --sabotage` gave 0 FAIL in the fast set (swapping a_r with b_r leaves r = 0 and every odd r unchanged);
+  it now makes the Mathieu solver return the next order of the sector: 2 FAIL.
+- CI: the `unittest discover` step could not fail (`> /dev/null && echo OK`); it now exits with the suite's status.
+- Text: the port contract is "qraft-port/0.3" (README and the `multiport` docstring said 0.2); the number of example
+  scripts (five) and the fluxonium sets and flux points were corrected.
 
 ## 0.2.0 — 2026-11-11 (local, unreleased)
 

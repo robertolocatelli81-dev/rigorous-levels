@@ -38,7 +38,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from qraft_ra.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint
+from qraft_ra.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint, _refuse_overflow
 from qraft_ra.hyperfine_molecule import _count_below_banded
 
 __all__ = ["Fluxonium", "guaranteed_fluxonium_levels", "cos_matrix", "OutOfDomain", "ArbMissing", "DeadlineExceeded"]
@@ -207,6 +207,7 @@ def _attempt(fl, f: Fluxonium, k: int, width: float, N: int, N2: int, dl: Option
     return tuple(low), tuple(high), float(cmax.upper())
 
 
+@_refuse_overflow
 def guaranteed_fluxonium_levels(f: Fluxonium, k: int = 6, width: float = 1e-10, *, deadline: Optional[float] = None,
                                 N_initial: Optional[int] = None, N_limit: int = N_LIMIT, prec: int = PREC_MIN) -> Intervals:
     """First k levels of H as guaranteed intervals (absolute width target `width`, unit of E_C). OutOfDomain if
@@ -223,6 +224,11 @@ def guaranteed_fluxonium_levels(f: Fluxonium, k: int = 6, width: float = 1e-10, 
         raise OutOfDomain(f"prec: expected an integer in [2, {PREC_MAX}]")
     if deadline is not None:
         deadline = _real(deadline, "deadline", True)
+    phi2 = math.sqrt(2.0 * f.E_C / f.E_L) if f.E_L > 0 else math.inf     # φ_zpf², float (inf if it overflows)
+    if not math.isfinite(phi2) or phi2 > N_LIMIT:              # bounds N2 ≤ 2.5·N_LIMIT + 8
+        # NEMESIS 0.3.0: E_C = 1e17 made N2 = 2.5·√(φ²N) unbounded and the cosine matrix on N + N2 states exhausted
+        # the memory (host OOM); the oscillator basis cannot hold these levels within N_limit anyway
+        raise OutOfDomain(f"φ_zpf² = √(2E_C/E_L) = {phi2:.3g}: beyond N_LIMIT = {N_LIMIT} (the levels need more Fock states than N_LIMIT)")
     fl = _flint()
     t0 = time.time()
     dl = None if deadline is None else t0 + deadline

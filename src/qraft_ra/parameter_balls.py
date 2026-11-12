@@ -95,28 +95,48 @@ class RotorBall:
         lo, hi = _interval(E_J, "E_J", positive=True)
         return cls(E_C, {1: (-hi, -lo)}, n_g)
 
+    @staticmethod
+    def _mid(lo: float, hi: float) -> float:
+        """The float midpoint used for the computations (lo/2 + hi/2: no overflow); it need not be the exact midpoint."""
+        return lo / 2 + hi / 2
+
     @property
     def rho(self) -> Fraction:
-        """ρ = Σ_m (c_m⁺ − c_m⁻)/2, the Lipschitz radius of the cosine box (exact)."""
-        return sum((Fraction(hi) - Fraction(lo)) / 2 for lo, hi in self.cosines.values())
+        """ρ = Σ_m max(c⁰_m − c_m⁻, c_m⁺ − c⁰_m) with c⁰_m the FLOAT midpoint actually used (exact Fractions): the
+        Lipschitz radius that covers the whole box even when the float midpoint is rounded (= Σ (c⁺ − c⁻)/2 when the
+        midpoint is exact)."""
+        out = Fraction(0)
+        for lo, hi in self.cosines.values():
+            c0 = Fraction(self._mid(lo, hi))
+            out += max(c0 - Fraction(lo), Fraction(hi) - c0)
+        return out
 
     def n_g_candidates(self) -> Tuple[float, ...]:
-        """The ends of the n_g interval and the band edges 0 and ½ (mod 1) inside it: where λ_j is extremal."""
-        a, b = self.n_g
-        if b - a >= 1.0:
+        """Where λ_j can be extremal, as exact floats in [0, 1): λ_j(n_g) is 1-periodic (n ↦ n + 1) and even (cosines
+        only), so the n_g interval is mapped exactly into [0, 2) (or folded onto [0, M] when it contains 0) and the
+        candidates are its ends and the band edges 0 and ½ inside it, reduced mod 1. Exact arithmetic, no float loop:
+        an n_g beyond 2^53 made the old loop endless."""
+        a, b = (Fraction(x) for x in self.n_g)
+        if b - a >= 1:
             return (0.0, 0.5)
-        cands = {a, b}
-        for edge in (0.0, 0.5):
-            x = math.floor(a - edge) + edge                   # the first edge ≥ a, then every unit step
-            while x < a:
-                x += 1.0
-            while x <= b:
-                cands.add(x)
-                x += 1.0
-        return tuple(sorted(cands))
+        if b <= 0:                                   # evenness: [a, b] ↦ [−b, −a], exact
+            a, b = -b, -a
+        if a < 0:                                    # contains 0: [a, b] folds onto [0, max(−a, b)], M < 1
+            ends = (Fraction(0), max(-a, b))
+        else:                                        # a ≥ 0: shift by floor(a), exact for floats (result < b)
+            k = math.floor(a)
+            ends = (a - k, b - k)                    # 0 ≤ a − k < 1, b − k < 2
+        cands = {e - math.floor(e) for e in ends}
+        for edge in (Fraction(0), Fraction(1, 2), Fraction(1), Fraction(3, 2)):
+            if ends[0] <= edge <= ends[1]:
+                cands.add(edge - math.floor(edge))
+        out = tuple(sorted(float(x) for x in cands))
+        if any(Fraction(x) != c for x, c in zip(out, sorted(cands))):      # never expected: refuse, do not round
+            raise OutOfDomain("n_g: a candidate is not an exact float")
+        return out
 
     def midpoint_rotor(self, E_C: float, n_g: float) -> Rotor:
-        return Rotor(E_C, {m: (lo + hi) / 2 for m, (lo, hi) in self.cosines.items()}, n_g=n_g)
+        return Rotor(E_C, {m: self._mid(lo, hi) for m, (lo, hi) in self.cosines.items()}, n_g=n_g)
 
 
 def guaranteed_levels_over_box(ball: RotorBall, k: int = 6, width: float = 1e-12, *,

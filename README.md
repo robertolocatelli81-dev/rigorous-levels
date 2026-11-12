@@ -72,11 +72,16 @@ guaranteed_levels, ...`; the Italian names of 0.2.0 are deprecated aliases that 
    (`scqubits_adapter.scqubits_spectrum`): scqubits' transmon at `ncut` and `2·ncut`; the threshold rule
    "scq-threshold/1.0" (`docs/THRESHOLD_RULE.md`: declared unit, absolute 1e-6 GHz, relative 1e-6, float floor)
    reports which of its three parts decided (`threshold_origin`).
-3. **The multiport** (`multiport`, `port_runner`, `isolation`; contract "qraft-port/0.2" in `docs/PORT_CONTRACT.md`):
+3. **The multiport** (`multiport`, `port_runner`, `isolation`; contract "qraft-port/0.3" in `docs/PORT_CONTRACT.md`):
    an external solver runs inside an isolation engine chosen from a closed, ordered list — `podman`, `docker`,
    `bwrap` (Linux), `sandbox-exec` (macOS), `appcontainer` (Windows), `wasm` (wasmtime + CPython for WASI) — each
    with no network, a read-only file system, no real home, a minimal environment, time and memory limits and a
-   fail-closed probe (an engine that is missing or does not isolate is never used silently). Its JSON output is
+   fail-closed probe (an engine that is missing or does not isolate is never used silently; on Linux and macOS every
+   engine binary must be owned by root and not writable by others, because the probe is measured from inside the
+   engine and a binary the user can replace could forge it; a user-installed binary only if listed in
+   `QRAFT_TRUSTED_ENGINES`). Not covered by that check: a container runtime set in the user's own podman or docker
+   configuration, the owner of the engine binary on Windows, and the AppContainer read grants (`icacls`) on the
+   interpreter and site-packages folders, which stay on those folders after the run. Its JSON output is
    validated against a closed schema and each level is compared with the intervals in exact arithmetic: `INSIDE`,
    `INSIDE_TOLERANCE` (within a float tolerance you declare), `OUTSIDE` (with the distance) or `NOT_COMPARABLE`
    (with the reason). Ports: scqubits, diatomic-py, qiskit-metal (`Hcpb`, `mathieu_level`), SQcircuit, pyEPR,
@@ -128,7 +133,10 @@ pip install ".[porte]"         # scqubits, diatomic-py, SQcircuit, pyEPR-quantum
 Python 3.10–3.14 (python-flint 0.9.0 has wheels for these). The multiport needs one isolation engine: bubblewrap
 (`bwrap`) or podman/docker with the image `python:<major>.<minor>-slim` of your interpreter already in the local
 store (it is never pulled), or `sandbox-exec` (macOS), or nothing beyond Windows itself (AppContainer), or `wasmtime`
-plus a CPython built for WASI in `QRAFT_PYTHON_WASM` (pure-Python ports only: no numpy exists for WASI). Not on PyPI.
+plus a CPython built for WASI in `QRAFT_PYTHON_WASM` (pure-Python ports only: no numpy exists for WASI). On POSIX
+every engine binary must be owned by root and not writable by group or others; a binary you installed yourself (for
+example wasmtime unpacked in your home) is used only if you list its exact real path in `QRAFT_TRUSTED_ENGINES`.
+Not on PyPI.
 
 ```python
 from qraft_ra import Rotor, guaranteed_levels, scqubits_spectrum, spectrum
@@ -247,7 +255,7 @@ unless stated):
 | scipy `mathieu_a/b` against those intervals | 1.17.1 (3.11.2) and 1.18.1 (3.12.15): 52 wrong, identical lists, 30 equal to another order ≤ 12, all 52 confirmed wrong by an independent tridiagonal reference (K = 400); 2.0.0.dev0+git20261108.c9073e6 (3.13.15): 0 wrong; scipy median 3.6 µs per value |
 | fluxonium, 4 published parameter sets, 4 levels | all `GUARANTEED`, width 5e-10 GHz, N = 54…117, 0.4–6.5 s; scqubits 4.3.1 cutoff 110 inside 16 of 16 levels, cutoff 6 outside |
 | fluxonium vs measured lines (one-mode H, parameters as printed) | Zhang et al. 2021: f01 13.88 MHz guaranteed vs 14 MHz measured; Moskalenko et al. 2022 qubit A: 685.73 vs 688.22 MHz (f01), 1831.20 vs 1832 MHz (f12); shifts reported, not judged |
-| isolation engines, controls S1–S7 | bwrap 0.8.0, podman 4.3.1 (rootless, cgroups v1) and wasmtime 50.0.1 + CPython 3.15.2 WASI: all S1–S7 pass (the control ports are pure Python; under WASI only the numpy solver ports cannot run, there is no numpy for WASI); docker, sandbox-exec, appcontainer: not measured locally (CI jobs written) |
+| isolation engines, controls S1–S7 | bwrap 0.8.0, podman 4.3.1 (rootless, cgroups v1) and wasmtime 50.0.1 + CPython 3.15.2 WASI (a user-installed wasmtime, listed in `QRAFT_TRUSTED_ENGINES`): all S1–S7 pass (the control ports are pure Python; under WASI only the numpy solver ports cannot run, there is no numpy for WASI); docker, sandbox-exec, appcontainer: not measured locally (CI jobs written) |
 | matrix elements, 200 transmons of the device regime, ⟨0|n|1⟩, ⟨1|n|2⟩, ⟨0|n|2⟩, ⟨0|cos φ|1⟩, ⟨1|cos φ|2⟩ (`bench/matrix_elements.py`) | 1000 of 1000 enclosures contain the scqubits 4.3.1 value (ncut 40); 0 without a bound; width median 2.7e-14, max 3.1e-12; 0.058 s median per element |
 | parameters as intervals, 200 transmons of the device regime, E_C and E_J ± 1 %, 6 levels, 5 inner points each (`bench/parameter_balls.py`) | 200 of 200 box intervals `GUARANTEED`; 0 of 1000 inner point intervals outside the box interval; a point with E_J 3 % above the box falls outside in 187 of 200 cases; box width / observed spread of the inner points: median 2.1, max 5.5; 0.11 s median per box |
 | generative input tests (seeded, every public entry point) | found and fixed before this commit: OverflowError on integers beyond float64 in 4 entry points, `nmax_limit` not validated, uncapped `M`, `L_limit`, `N_limit`, `**kw` in `mathieu_a/b` |
@@ -280,9 +288,10 @@ package, not the source tree). The sandbox tests run once per isolation engine w
 in a fresh interpreter and checks what it prints. `bench/matrix.sh VENV...` reproduces the CI matrix locally (stack
 default / unlimited / 1 MiB, engines present, bwrap absent, bwrap failing; fresh HOME per run).
 
-Measured on 2026-11-11 (23:20 CET) on this tree with `bench/matrix.sh` on the four venvs, each run against the
+Measured on 2026-11-12 (01:33 CET) on this tree with `bench/matrix.sh` on the four venvs, each run against the
 package installed from the tree in a fresh temporary HOME, bwrap 0.8.0, podman 4.3.1 with the image
-`python:<minor>-slim` in the local store, wasmtime 50.0.1 + CPython 3.15.2 WASI: 20 of 20 runs OK, 321 tests each.
+`python:<minor>-slim` in the local store, wasmtime 50.0.1 (listed in `QRAFT_TRUSTED_ENGINES`) + CPython 3.15.2 WASI:
+20 of 20 runs OK, 334 tests each.
 
 | Python | numpy, scipy, python-flint | scqubits | stack default / unlimited / 1 MiB | bwrap hidden from PATH | fake bwrap (not root-owned) |
 |---|---|---|---|---|---|
@@ -300,10 +309,11 @@ was present (0 skipped for them).
 
 `python -m qraft_ra.reproduce` re-measures the numerical claims of this file offline, one `[PASS]`/`[FAIL]` line per
 claim with the measured and the published value (fast set: 22 s on the author's machine; `--full` adds the
-40 025-value Mathieu grid and the 200 wide-range transmons: 108 s); `--sabotage` alters the Mathieu solver and must
-show at least one `[FAIL]` (positive control); `--readme` checks that every published value appears verbatim here and
+40 025-value Mathieu grid and the 200 wide-range transmons: 108 s); `--sabotage` makes the Mathieu solver return the next order of
+the sector and must show at least one `[FAIL]` (positive control); `--readme` checks that every published value appears verbatim here and
 is run by `python check_tree.py`, so a number edited by hand fails the tree check. Measured on 2026-11-11 on this
-tree: fast set 10 of 10 PASS, `--full` 11 of 11, `--sabotage` 1 FAIL.
+tree: fast set 9 of 9 PASS (the 2 slow claims print `[SLOW]` and run only with `--full`), `--full` 11 of 11,
+`--sabotage` 2 FAIL (a_0(1) and a_11(299), the latter returning scipy's wrong 232.195; exit 0).
 
 Determinism: `python -m qraft_ra.reproduce --hash` prints the sha256 of a fixed set of exact enclosures. Measured on
 2026-11-11: `c3ae60dd0a4ab2db23f0091269777fe24e4d2acc2434e7298d860e6437c8cd0c` on Python 3.11.2 (numpy 2.4.6, scipy
