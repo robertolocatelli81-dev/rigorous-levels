@@ -379,7 +379,9 @@ Python 3.10–3.14, 161 tests each).
 
 Release v0.3.0 (2026-11-12): the wheel, the sdist and `SHA256SUMS` are built by `.github/workflows/release.yml` from the
 signed tag, with hash-pinned build tools, and carry a build-provenance attestation
-(`gh attestation verify <file> --repo robertolocatelli81-dev/rigorous-levels`). `FILE_LIST.tsv` lists every file with its sha256 and, for the modules derived from the
+(`gh attestation verify <file> --repo robertolocatelli81-dev/rigorous-levels`), archived on Zenodo: DOI
+[10.5281/zenodo.24172689](https://doi.org/10.5281/zenodo.24172689) for 0.3.0, concept DOI
+[10.5281/zenodo.24172688](https://doi.org/10.5281/zenodo.24172688) for the latest version. `FILE_LIST.tsv` lists every file with its sha256 and, for the modules derived from the
 author's repository, the sha256 of the source file; `python check_tree.py` checks the list, the imports, a deny-list
 and runs gitleaks.
 

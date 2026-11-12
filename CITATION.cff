@@ -4,6 +4,14 @@ title: "rigorous-levels: guaranteed eigenvalue intervals for the charge-basis ro
 type: software
 version: 0.3.0
 date-released: "2026-11-12"
+doi: 10.5281/zenodo.24172688
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.24172688
+    description: "Concept DOI: always resolves to the latest version"
+  - type: doi
+    value: 10.5281/zenodo.24172689
+    description: "Version 0.3.0"
 license: Apache-2.0
 authors:
   - family-names: Locatelli
