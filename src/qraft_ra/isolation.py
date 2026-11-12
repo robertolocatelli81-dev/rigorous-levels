@@ -49,6 +49,7 @@ CLIENT_ENV = ("PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "XDG_RUNTIME_DIR", "X
               "SYSTEMROOT", "SYSTEMDRIVE", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "PROGRAMDATA", "COMSPEC")
 SANDBOX_ENV = {"HOME": "/tmp/nohome", "PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1",
                "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"}
+CONTAINER_PIDS = 64   # docker --pids-limit (processes and threads of the container)
 _PROBES: Dict[Tuple[str, str], Dict[str, object]] = {}
 
 
@@ -262,6 +263,11 @@ def _container_cmd(engine: str, exe: str, image: str, name: str, seconds: int, m
         cmd += ["--user", "65534:65534"]
     if engine == "podman":
         cmd += ["--timeout", str(seconds)]        # conmon kills the container; the host timeout is the second guard
+    else:
+        # rootful docker runs the port with the host uid in the host user namespace: RLIMIT_NPROC there counts every
+        # process and thread of that user on the host (CI 2026-11-12: "can't start new thread" with 16), so the
+        # process cap is the container's own pids cgroup and the runner does not set RLIMIT_NPROC
+        cmd += ["--pids-limit", str(CONTAINER_PIDS), "--env", "QRAFT_NPROC=cgroup"]
     for m in mounts_ro:
         cmd += ["-v", f"{m}:{m}:ro"]
     cmd += ["-v", f"{work}:/work:ro", "-v", f"{out_path}:/work/output.json:rw", image]

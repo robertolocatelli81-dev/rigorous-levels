@@ -40,6 +40,8 @@ def _rlimit(seconds: int, mem_mib: int) -> None:
     resource.setrlimit(resource.RLIMIT_CPU, (seconds, seconds))
     resource.setrlimit(resource.RLIMIT_AS, (mem_mib * 1024 * 1024, mem_mib * 1024 * 1024))
     resource.setrlimit(resource.RLIMIT_FSIZE, (64 * 1024 * 1024, 64 * 1024 * 1024))
+    if os.environ.get("QRAFT_NPROC") == "cgroup":   # docker: the pids cgroup of the container is the cap
+        return
     try:
         resource.setrlimit(resource.RLIMIT_NPROC, (16, 16))
     except (ValueError, OSError):
@@ -403,7 +405,7 @@ def _skeleton(r) -> dict:
 
 
 def main(folder: str) -> int:
-    t0 = time.time()
+    t0 = time.perf_counter()
     for v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
         os.environ.setdefault(v, "1")               # before numpy: BLAS threads under RLIMIT_AS fail (SIGINT)
     batch = os.path.isfile(os.path.join(folder, "requests.json"))
@@ -427,12 +429,12 @@ def main(folder: str) -> int:
             o["reason"] = f"{type(e).__name__}: {e}"[:600]
         reqs = []
     for r, o in zip(reqs, outputs):
-        t1 = time.time()
+        t1 = time.perf_counter()
         if isinstance(r, dict):
             _run_one(r, o)
         else:
             o["reason"] = "request is not an object"
-        o["seconds"] = round(time.time() - t1, 3)
+        o["seconds"] = round(time.perf_counter() - t1, 3)
     with open(os.path.join(_output_dir(folder), "output.json"), "w", encoding="utf-8") as f:
         json.dump(outputs if batch else outputs[0], f)
     return 0 if all(o["state"] == "OK" for o in outputs) else 1

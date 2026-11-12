@@ -412,8 +412,9 @@ class TestNemesis20261111(unittest.TestCase):
             self.assertEqual(MP.read_output(p)[0], buona)              # check positivo: la valida passa
             os.symlink(p, os.path.join(d, "link"))
             self.assertIsNone(MP.read_output(os.path.join(d, "link"))[0])
-            os.mkfifo(os.path.join(d, "fifo"))
-            self.assertIsNone(MP.read_output(os.path.join(d, "fifo"))[0])
+            if hasattr(os, "mkfifo"):
+                os.mkfifo(os.path.join(d, "fifo"))
+                self.assertIsNone(MP.read_output(os.path.join(d, "fifo"))[0])
             os.mkdir(os.path.join(d, "cartella"))
             self.assertIsNone(MP.read_output(os.path.join(d, "cartella"))[0])
             self.assertIsNone(MP.read_output(os.path.join(d, "assente"))[0])
@@ -484,6 +485,62 @@ class TestNemesis20261111(unittest.TestCase):
             isolation.shutil.which = originale
             isolation._PROBES.update(probes)
             shutil.rmtree(d, ignore_errors=True)
+
+
+class TestCI20261112Platforms(unittest.TestCase):
+    """First CI run on macOS/Windows/ARM (2026-11-12): two product defects that Linux could not show."""
+
+    def test_output_link_refused_without_o_nofollow(self):
+        # Windows has no O_NOFOLLOW: a symlink output.json was followed and read
+        from unittest import mock
+
+        class SenzaNofollow:
+            def __getattr__(self, name):
+                if name == "O_NOFOLLOW":
+                    raise AttributeError(name)
+                return getattr(os, name)
+
+        d = tempfile.mkdtemp(prefix="link_")
+        try:
+            p = os.path.join(d, "vera.json")
+            with open(p, "w") as f:
+                json.dump({"x": 1}, f)
+            try:
+                os.symlink(p, os.path.join(d, "link"))
+            except (OSError, NotImplementedError) as e:
+                self.skipTest(f"symlink not creatable here: {e}")
+            with mock.patch.object(MP, "os", SenzaNofollow()):
+                doc, reason = MP.read_output(os.path.join(d, "link"))
+                self.assertIsNone(doc)
+                self.assertIn("link", reason)
+                self.assertEqual(MP.read_output(p)[0], {"x": 1})                    # positive control
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_docker_caps_processes_with_its_cgroup_not_rlimit_nproc(self):
+        # rootful docker: --user is the host uid in the host user namespace, where RLIMIT_NPROC counts every process
+        # of that user (CI linux 3.10: "can't start new thread")
+        from qraft_ra import isolation
+        cmd = isolation._container_cmd("docker", "docker", "img", "n", 30, [], "/w", "/w/o.json")
+        self.assertIn("--pids-limit", cmd)
+        self.assertEqual(cmd[cmd.index("--pids-limit") + 1], str(isolation.CONTAINER_PIDS))
+        self.assertIn("QRAFT_NPROC=cgroup", cmd)
+        cmd = isolation._container_cmd("podman", "podman", "img", "n", 30, [], "/w", "/w/o.json")
+        self.assertNotIn("QRAFT_NPROC=cgroup", cmd)                                   # podman: own user namespace
+
+    @unittest.skipUnless(os.name == "posix", "resource limits: POSIX")
+    def test_runner_skips_rlimit_nproc_only_when_told(self):
+        from unittest import mock
+        from qraft_ra import port_runner as R
+        if R.resource is None:
+            self.skipTest("resource absent")
+        for env, attesa in (({"QRAFT_NPROC": "cgroup"}, False), ({}, True)):
+            with mock.patch.dict(os.environ, env, clear=False), mock.patch.object(R.resource, "setrlimit") as s:
+                if not env:
+                    os.environ.pop("QRAFT_NPROC", None)
+                R._rlimit(10, 512)
+                chiamati = [c.args[0] for c in s.call_args_list]
+                self.assertEqual(R.resource.RLIMIT_NPROC in chiamati, attesa, env)
 
 
 class TestNemesis030EngineTrust(unittest.TestCase):
@@ -762,6 +819,7 @@ class TestPrefissoInterprete(unittest.TestCase):
         finally:
             shutil.rmtree(d, ignore_errors=True)
 
+    @unittest.skipUnless(os.name == "posix", "interpreter_pieces serves bwrap (Linux); the fake interpreter is a sh script")
     def test_pezzi_chiusi_stdlib_platstdlib_libpython(self):
         """Lista chiusa dei pezzi: eseguibile, stdlib, platstdlib (anche se diversa), libpython*.so* di LIBDIR; altro no."""
         d = os.path.realpath(tempfile.mkdtemp(prefix="finto_python_"))
@@ -796,6 +854,7 @@ class TestPrefissoInterprete(unittest.TestCase):
         self.assertIn("write: blocked", u.reason)
         self.assertFalse(esiste)
 
+    @unittest.skipUnless(os.name == "posix", "pwd and user homes from the password database: POSIX only")
     def test_case_utente_anche_da_pwd(self):
         import pwd
         vecchio = os.environ.get("HOME")

@@ -145,7 +145,7 @@ def guaranteed_matrix_element(r: Rotor, i: int, j: int, operator: str = "n", m: 
     kk = max(i, j) + 2 if k is None else k
     if isinstance(kk, bool) or not isinstance(kk, int) or kk < max(i, j) + 2 or kk > K_MAX:
         raise OutOfDomain(f"k: expected an integer in [{max(i, j) + 2}, {K_MAX}]")
-    t0 = time.monotonic()
+    t0 = time.perf_counter()
     try:
         iv = guaranteed_levels(r, kk, width, deadline=deadline)
     except InputRejected as e:
@@ -189,4 +189,4 @@ def guaranteed_matrix_element(r: Rotor, i: int, j: int, operator: str = "n", m: 
     low, high = v_lo - err, v_hi + err
     return MatrixElement(operator, m, i, j, low, high, float(val), float(high - low),
                          (float(sin_b[0]), float(sin_b[1])), (float(gaps[0]), float(gaps[1])),
-                         (float(eps[0]), float(eps[1])), iv, iv.N, round(time.monotonic() - t0, 3))
+                         (float(eps[0]), float(eps[1])), iv, iv.N, round(time.perf_counter() - t0, 3))

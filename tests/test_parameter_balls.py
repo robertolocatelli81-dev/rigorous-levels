@@ -88,21 +88,18 @@ class TestChargeOffsetInterval(unittest.TestCase):
 
     def test_candidates_far_from_zero_are_exact_and_finite(self):
         """NEMESIS 0.3.0: n_g beyond 2^53 made the float loop endless (x + 1.0 == x); now exact and reduced mod 1."""
-        import signal
-        def boom(*a):
-            raise TimeoutError("n_g_candidates did not return")
-        old = signal.signal(signal.SIGALRM, boom)
-        signal.alarm(5)
-        try:
-            self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(1e17, 1e17)).n_g_candidates(), (0.0,))
-            self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(2.0 ** 60, 2.0 ** 60 + 256)).n_g_candidates(), (0.0, 0.5))
-            self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(1e6 + 0.25, 1e6 + 0.75)).n_g_candidates(),
-                             (0.25, 0.5, 0.75))
-            self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(-0.75, -0.25)).n_g_candidates(), (0.25, 0.5, 0.75))
-            self.assertEqual(RotorBall.transmon(0.3, 1.5, n_g=(-0.3, 0.6)).n_g_candidates(), (0.0, 0.5, 0.6))
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old)
+        import threading
+        casi = [((1e17, 1e17), (0.0,)), ((2.0 ** 60, 2.0 ** 60 + 256), (0.0, 0.5)),
+                ((1e6 + 0.25, 1e6 + 0.75), (0.25, 0.5, 0.75)), ((-0.75, -0.25), (0.25, 0.5, 0.75)),
+                ((-0.3, 0.6), (0.0, 0.5, 0.6))]
+        got = []
+        # a thread with a time limit instead of SIGALRM (absent on Windows): an endless loop leaves it alive
+        t = threading.Thread(target=lambda: got.extend(RotorBall.transmon(0.3, 1.5, n_g=ng).n_g_candidates()
+                                                       for ng, _ in casi), daemon=True)
+        t.start()
+        t.join(5)
+        self.assertFalse(t.is_alive(), "n_g_candidates did not return within 5 s")
+        self.assertEqual(got, [want for _, want in casi])
         far = guaranteed_levels_over_box(RotorBall.transmon(0.3, 15.0, n_g=(1e6 + 0.25, 1e6 + 0.25)), 2)
         near = guaranteed_levels_over_box(RotorBall.transmon(0.3, 15.0, n_g=0.25), 2)
         self.assertEqual((far.low, far.high), (near.low, near.high))

@@ -326,7 +326,7 @@ def _symbolic_matrix(m: SigmaMolecule, dMF: int, Lmax: int, dl: Optional[float] 
     n = len(states)
     el: Dict[Tuple[int, int], Terms] = {}
     for i in range(n):
-        if dl is not None and time.time() > dl:
+        if dl is not None and time.perf_counter() > dl:
             raise DeadlineExceeded(f"deadline exceeded while building the matrix at L = {Lmax}")
         for j in range(i, n):
             if abs(states[i][0] - states[j][0]) > 2:
@@ -517,7 +517,7 @@ def _attempt(fl, m: SigmaMolecule, dMF: int, k: int, width: float, L: int, dl):
     for j in range(k):
         delta = max(abs(float(approx[j])), m.B) * width / 4
         for _ in range(60):
-            if dl is not None and time.time() > dl:
+            if dl is not None and time.perf_counter() > dl:
                 raise DeadlineExceeded(f"deadline exceeded at L = {L}")
             lo = Fraction(float(approx[j])) - Fraction(delta)
             hi = Fraction(float(approx[j])) + Fraction(delta)
@@ -564,7 +564,7 @@ def guaranteed_molecule_levels(m: SigmaMolecule, two_MF: int, k: int = 4, width:
     if deadline is not None:
         deadline = _real(deadline, "deadline", positive=True)
     fl = _flint()
-    t0 = time.time()
+    t0 = time.perf_counter()
     dl = None if deadline is None else t0 + deadline
     # smallest L: the sector must have at least k states
     L = 0
@@ -572,7 +572,7 @@ def guaranteed_molecule_levels(m: SigmaMolecule, two_MF: int, k: int = 4, width:
         L += 1
         if L > L_limit:
             raise OutOfDomain(f"the sector 2M_F = {dMF} has no k = {k} states within L_limit = {L_limit}")
-        if dl is not None and time.time() > dl:
+        if dl is not None and time.perf_counter() > dl:
             raise DeadlineExceeded(f"deadline of {deadline} s exceeded while looking for the smallest L")
     if L_initial is not None:
         L = _integer(L_initial, "L_initial", 0)
@@ -593,7 +593,7 @@ def guaranteed_molecule_levels(m: SigmaMolecule, two_MF: int, k: int = 4, width:
         while True:
             p = max(prec, PREC_MIN)
             while p <= PREC_MAX:
-                if dl is not None and time.time() > dl:
+                if dl is not None and time.perf_counter() > dl:
                     raise DeadlineExceeded(f"deadline of {deadline} s exceeded at L = {L}")
                 fl.ctx.prec = p
                 res = _attempt(fl, m, dMF, k, width, L, dl)
@@ -603,12 +603,12 @@ def guaranteed_molecule_levels(m: SigmaMolecule, two_MF: int, k: int = 4, width:
                     target = width * max(max(abs(float(b)) for b in low), m.B)
                     strings = tuple((str(float(b)), str(float(a))) for b, a in zip(low, high))
                     iv = Intervals(low, high, strings, w, "GUARANTEED" if w <= target else "WIDE",
-                                   L, p, eta, round(time.time() - t0, 3))
+                                   L, p, eta, round(time.perf_counter() - t0, 3))
                     if iv.state == "GUARANTEED":
                         return iv
                     # WIDE: valid, but a larger L is tried (the width from η falls with L) while it halves
                     if best is not None and not (w < best.max_width / 2):
-                        return replace(best, seconds=round(time.time() - t0, 3))
+                        return replace(best, seconds=round(time.perf_counter() - t0, 3))
                     best = iv
                     break
                 p *= 2
@@ -616,7 +616,7 @@ def guaranteed_molecule_levels(m: SigmaMolecule, two_MF: int, k: int = 4, width:
                 break
             L = min(L + 2, L_limit)
         if best is not None:
-            return replace(best, seconds=round(time.time() - t0, 3))
+            return replace(best, seconds=round(time.perf_counter() - t0, 3))
         raise OutOfDomain(f"no interval proven within L_limit = {L_limit}")
     finally:
         fl.ctx.prec = old_prec

@@ -171,7 +171,7 @@ def mathieu_value(kind: str, r: int, q, width: float = 1e-12, *, deadline: Optio
                                  or not _finite(deadline) or deadline <= 0):
         raise OutOfDomain("deadline: expected a finite number > 0 or None")
     fl = _flint()
-    t0 = time.time()
+    t0 = time.perf_counter()
     qe = Fraction(qf)
     if K_initial is None:
         K = k0 + n + 12 + int(1.5 * math.sqrt(abs(qf)))
@@ -185,7 +185,7 @@ def mathieu_value(kind: str, r: int, q, width: float = 1e-12, *, deadline: Optio
         while True:
             p = max(prec, PREC_MIN)
             while p <= PREC_MAX:
-                if deadline is not None and time.time() - t0 > deadline:
+                if deadline is not None and time.perf_counter() - t0 > deadline:
                     raise DeadlineExceeded(f"deadline of {deadline} s exceeded at K = {K}")
                 fl.ctx.prec = p
                 res = _attempt(fl, kind, nu, k0, n, qe, K, width)
@@ -194,7 +194,7 @@ def mathieu_value(kind: str, r: int, q, width: float = 1e-12, *, deadline: Optio
                     w = float(hi - lo)
                     target = width * max(abs(float(lo)), 1.0)
                     return MathieuValue(kind, int(r), qf, lo, hi, (str(float(lo)), str(float(hi))), w,
-                                        GUARANTEED if w <= target else WIDE, K, p, eta, round(time.time() - t0, 3))
+                                        GUARANTEED if w <= target else WIDE, K, p, eta, round(time.perf_counter() - t0, 3))
                 p *= 2
             if K >= K_limit:
                 break

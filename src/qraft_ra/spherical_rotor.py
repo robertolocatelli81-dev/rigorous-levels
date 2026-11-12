@@ -192,7 +192,7 @@ def guaranteed_sphere_levels(r: SphericalRotor, k: int = 6, width: float = 1e-12
     if deadline is not None:
         deadline = _real(deadline, "deadline", True)
     fl = _flint()
-    t0 = time.time()
+    t0 = time.perf_counter()
     if L_initial is not None:
         L = _integer(L_initial, "L_initial", abs(r.M) + k)
     else:
@@ -208,7 +208,7 @@ def guaranteed_sphere_levels(r: SphericalRotor, k: int = 6, width: float = 1e-12
         while L <= L_limit:
             p = max(prec, PREC_MIN)
             while p <= PREC_MAX:
-                if deadline is not None and time.time() - t0 > deadline:
+                if deadline is not None and time.perf_counter() - t0 > deadline:
                     raise DeadlineExceeded(f"deadline of {deadline} s exceeded at L = {L}")
                 fl.ctx.prec = p
                 res = _attempt(fl, r, k, width, L)
@@ -218,7 +218,7 @@ def guaranteed_sphere_levels(r: SphericalRotor, k: int = 6, width: float = 1e-12
                     target = width * max(max(abs(float(b)) for b in low), r.B)
                     strings = tuple((str(float(b)), str(float(a))) for b, a in zip(low, high))
                     return Intervals(low, high, strings, w, "GUARANTEED" if w <= target else "WIDE",
-                                     L, p, eta, round(time.time() - t0, 3))
+                                     L, p, eta, round(time.perf_counter() - t0, 3))
                 p *= 2
             if L >= L_limit:
                 break

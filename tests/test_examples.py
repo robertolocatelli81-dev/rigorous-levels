@@ -20,6 +20,8 @@ def run(script):
     for k in ("PYTHONUSERBASE", "SYSTEMROOT", "TEMP", "TMP"):
         if k in os.environ:
             env[k] = os.environ[k]
+    if os.name == "nt":   # Windows has no password database: Path.home() needs USERPROFILE (qutip, imported by scqubits)
+        env["USERPROFILE"] = tempfile.mkdtemp(prefix="qraft_home_")
     p = subprocess.run([sys.executable, "-I", "-B", str(EXAMPLES / script)], capture_output=True, text=True, timeout=900, env=env)
     return p.returncode, p.stdout, p.stderr
 

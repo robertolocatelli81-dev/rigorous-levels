@@ -189,7 +189,7 @@ def _attempt(fl, f: Fluxonium, k: int, width: float, N: int, N2: int, dl: Option
     for j in range(k):
         delta = width / 4
         for _ in range(60):
-            if dl is not None and time.time() > dl:
+            if dl is not None and time.perf_counter() > dl:
                 raise DeadlineExceeded(f"deadline exceeded at N = {N}")
             lo = Fraction(float(approx[j])) - Fraction(delta)
             hi = Fraction(float(approx[j])) + Fraction(delta)
@@ -230,7 +230,7 @@ def guaranteed_fluxonium_levels(f: Fluxonium, k: int = 6, width: float = 1e-10, 
         # the memory (host OOM); the oscillator basis cannot hold these levels within N_limit anyway
         raise OutOfDomain(f"φ_zpf² = √(2E_C/E_L) = {phi2:.3g}: beyond N_LIMIT = {N_LIMIT} (the levels need more Fock states than N_LIMIT)")
     fl = _flint()
-    t0 = time.time()
+    t0 = time.perf_counter()
     dl = None if deadline is None else t0 + deadline
     if N_initial is None:
         N = max(2 * k + 12, int(6 * f.phi_zpf ** 2) + 16)
@@ -245,7 +245,7 @@ def guaranteed_fluxonium_levels(f: Fluxonium, k: int = 6, width: float = 1e-10, 
         while True:
             p = max(prec, PREC_MIN)
             while p <= PREC_MAX:
-                if dl is not None and time.time() > dl:
+                if dl is not None and time.perf_counter() > dl:
                     raise DeadlineExceeded(f"deadline of {deadline} s exceeded at N = {N}")
                 fl.ctx.prec = p
                 res = _attempt(fl, f, k, width, N, max(40, int(2.5 * math.sqrt(float(f.phi_zpf ** 2) * N)) + 8), dl)
@@ -254,7 +254,7 @@ def guaranteed_fluxonium_levels(f: Fluxonium, k: int = 6, width: float = 1e-10, 
                     w = max(float(a - c) for a, c in zip(high, low))
                     strings = tuple((str(float(c)), str(float(a))) for c, a in zip(low, high))
                     iv = Intervals(low, high, strings, w, GUARANTEED if w <= width else WIDE, N, p, b,
-                                   round(time.time() - t0, 3))
+                                   round(time.perf_counter() - t0, 3))
                     if iv.state == GUARANTEED:
                         return iv
                     if best is not None and not (w < best.max_width / 2):

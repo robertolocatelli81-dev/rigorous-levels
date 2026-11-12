@@ -283,14 +283,23 @@ def read_output(path: str, max_bytes: int = OUTPUT_MAX_BYTES) -> Tuple[Optional[
     duplicate keys, nesting at most OUTPUT_MAX_DEPTH levels, counted BEFORE the parser (the parser's recursion limit
     changes between Python versions: on CPython 3.14.10 an object nested 100 000 times passed).
     (doc, "") or (None, reason)."""
+    import stat as _stat
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        # where O_NOFOLLOW does not exist (Windows) the link is refused from lstat and the opened file must be the
+        # one lstat saw (CI 2026-11-12, Windows: a symlink output.json was followed); reparse points are refused too
+        before = os.lstat(path)
+        if _stat.S_ISLNK(before.st_mode) or getattr(before, "st_file_attributes", 0) & 0x400:
+            return None, "output is a link, not a regular file"
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                     | getattr(os, "O_BINARY", 0))
     except OSError as e:
         return None, f"no readable output: {type(e).__name__}"
     try:
-        import stat as _stat
-        if not _stat.S_ISREG(os.fstat(fd).st_mode):
+        st = os.fstat(fd)
+        if not _stat.S_ISREG(st.st_mode):
             return None, "output is not a regular file"
+        if (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino):
+            return None, "output changed between lstat and open"
         with os.fdopen(fd, "rb") as f:
             fd = -1
             data = f.read(max_bytes + 1)

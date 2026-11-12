@@ -200,6 +200,24 @@ root refusal (its test runs in the Windows CI job only); the `--sabotage` change
 - Text: the port contract is "qraft-port/0.3" (README and the `multiport` docstring said 0.2); the number of example
   scripts (five) and the fluxonium sets and flux points were corrected.
 
+### Fixed after the first CI run on macOS, Windows and ARM (2026-11-12)
+
+The first run of the branch on GitHub (run 43152525407): 11 of 16 jobs green; Linux ARM64 and free-threaded 3.14t
+green; 5 red. Product defects, each with a test that fails on the tree before it:
+
+- `read_output` followed a symlink `output.json` on Windows, where `O_NOFOLLOW` does not exist: the link (and a
+  reparse point) is now refused from `lstat`, and the opened file must be the one `lstat` saw.
+- docker: the runner's RLIMIT_NPROC of 16 counted every process of the host user (rootful docker, host user
+  namespace): "can't start new thread" in the scqubits port on Linux 3.10. docker now caps the container with
+  `--pids-limit 64` and the runner leaves RLIMIT_NPROC to podman and bwrap.
+- Deadlines and elapsed times use `time.perf_counter()`: on Windows with Python 3.12 a deadline of 1e-9 s did not
+  raise DeadlineExceeded in `mathieu_a` and `guaranteed_sphere_levels` with the clocks used before (`time.time`,
+  `time.monotonic`), whose resolution there is coarse; Windows with Python 3.14 passed.
+
+Test and CI fixes: tests that need `pwd`, a `sh` fake interpreter or `SIGALRM` are POSIX-only or use a thread with a
+time limit; the examples get a fresh `USERPROFILE` on Windows (qutip needs a home); scqubits 4.3.1 is not installed
+on macOS, where it requires scipy ≤ 1.13.1 (its scqubits tests are skipped there with the reason).
+
 ## 0.2.0 — 2026-11-11 (local, unreleased)
 
 Added (every module carries its proof or its measurement in the docstring; identifiers, states and the docstrings of the

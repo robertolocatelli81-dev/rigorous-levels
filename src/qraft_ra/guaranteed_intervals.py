@@ -287,7 +287,7 @@ def _count_arb(flint, diag, bande, cache: Dict, x: Fraction, prec: int, deadline
     if a pivot has an uncertain sign the precision doubles up to PREC_MAX. Returns (count or −1, precision)."""
     p = prec
     while p <= PREC_MAX:
-        if deadline is not None and time.monotonic() > deadline:
+        if deadline is not None and time.perf_counter() > deadline:
             raise DeadlineExceeded("deadline exceeded during a count")
         old = flint.ctx.prec
         flint.ctx.prec = p
@@ -346,7 +346,7 @@ def guaranteed_levels(r, k: int = 6, width: float = 1e-12, *, deadline: Optional
                                  or not _finite(deadline) or deadline < 0):
         raise OutOfDomain("deadline: expected a finite number >= 0 or None")
     flint = _flint()
-    t0 = time.monotonic()
+    t0 = time.perf_counter()
     deadline = None if deadline is None else t0 + float(deadline)
     U = sum(abs(c) for _, c in r.cosines)
     absng = abs(Fraction(r.n_g))
@@ -359,7 +359,7 @@ def guaranteed_levels(r, k: int = 6, width: float = 1e-12, *, deadline: Optional
     ultimo = None
     incerto = False            # a count kept an uncertain sign even at PREC_MAX
     while N <= N_limit:
-        if deadline is not None and time.monotonic() > deadline:
+        if deadline is not None and time.perf_counter() > deadline:
             raise DeadlineExceeded("deadline exceeded")
         diag_su, bande = _matrix(r, N, None)
         stime = _float_estimates(diag_su, bande, k)
@@ -396,7 +396,7 @@ def guaranteed_levels(r, k: int = 6, width: float = 1e-12, *, deadline: Optional
         larg = max(h - l for l, h in zip(bassi_s, alti_s))
         ultimo = Intervals(bassi_s, alti_s, strings, float(_decimal(larg, True)),
                             GUARANTEED if larg <= obiettivo else WIDE, N, min(max(p1, p2), PREC_MAX), float(alpha),
-                            time.monotonic() - t0)
+                            time.perf_counter() - t0)
         if larg <= obiettivo or N * 2 > N_limit:
             return ultimo
         N *= 2
