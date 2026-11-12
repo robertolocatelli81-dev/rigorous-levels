@@ -191,8 +191,12 @@ jobs:
               I._icacls(p, s, "RX")
           probe, out = os.path.join(d, "p.py"), os.path.join(d, "o.txt")
           with open(probe, "w") as f:
-              f.write("import sys\nr = []\nfor m in ('rb', 'wb', 'r+b'):\n    try:\n        open('nul', m).close(); r.append(m + ' ok')\n"
-                      "    except OSError as e:\n        r.append(f'{m} {type(e).__name__} {e.errno}')\nopen(sys.argv[1], 'w').write('; '.join(r))\n")
+              f.write("import os, sys, tempfile\nr = []\nfor m in ('rb', 'wb', 'r+b'):\n    try:\n        open('nul', m).close(); r.append(m + ' ok')\n"
+                      "    except OSError as e:\n        r.append(f'{m} {type(e).__name__} {e.errno}')\n"
+                      "r += [f'{k}={os.environ.get(k)!r} exists={os.path.isdir(os.environ.get(k, chr(1)))}' for k in ('TEMP', 'TMP', 'LOCALAPPDATA', 'USERPROFILE')]\n"
+                      "r.append(f'cwd={os.getcwd()!r} gettempdir={tempfile.gettempdir()!r}')\n"
+                      "open(sys.argv[1], 'w').write('; '.join(r))\n")
+          print("TEMP passed to the AppContainer:", d)
           env = {**I._appcontainer_base_env(d), "TEMP": d, "TMP": d}
           cmd = subprocess.list2cmdline([sys.executable, "-I", "-S", "-B", probe, out])
           try:

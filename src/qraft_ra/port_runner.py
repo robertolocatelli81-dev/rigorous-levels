@@ -75,11 +75,13 @@ def _rlimit(seconds: int, mem_mib: int) -> None:
 
 def _where(path: str) -> str:
     """Placeholders of the test ports for the engines that run on host paths (sandbox-exec, appcontainer): $WORK is
-    the read-only work folder, $TMP the writable scratch folder; any other path is taken as written."""
+    the read-only work folder, $TMP the folder tempfile chooses (TMPDIR, TEMP, TMP, then the platform's list and the
+    current folder: the scratch folder of these engines); any other path is taken as written."""
     if path == "$WORK":
         return sys.argv[1]
-    if path == "$TMP":
-        return os.environ.get("TMPDIR") or os.environ.get("TEMP") or "/tmp"
+    if path == "$TMP":                 # where a solver's temporary files go (tempfile's own rule)
+        import tempfile
+        return tempfile.gettempdir()
     return path
 
 
@@ -273,7 +275,7 @@ def port_test_hostile(r):
                         f.write(b"\0" * 1048576)
                         written += 1
             except OSError as e:
-                raise RuntimeError(f"disk: {written} MiB then {type(e).__name__}")
+                raise RuntimeError(f"disk: {written} MiB then {type(e).__name__} in {_where(t['where'])}")
         raise RuntimeError(f"disk: {written} MiB written")
     if mode == "write":
         try:

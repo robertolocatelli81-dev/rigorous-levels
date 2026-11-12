@@ -711,10 +711,12 @@ class TestCI20261112Watchdog(unittest.TestCase):
 
     def test_seatbelt_output_file_writable_data_only(self):
         from qraft_ra import isolation
-        prof = isolation.seatbelt_profile(sys.executable, [], "/qraft_x/o.json", "/qraft_x/s")
-        self.assertIn('(allow file-write-data (literal "/qraft_x/o.json"))', prof)
-        self.assertNotIn('file-write* (literal "/qraft_x/o.json")', prof)   # unlink/create would allow a link there
-        self.assertIn('(allow file-write* (subpath "/qraft_x/s"))', prof)
+        out, scratch = os.path.join(os.sep, "qraft_x", "o.json"), os.path.join(os.sep, "qraft_x", "s")
+        prof = isolation.seatbelt_profile(sys.executable, [], out, scratch)
+        lit = isolation._sb_literal
+        self.assertIn(f"(allow file-write-data (literal {lit(os.path.realpath(out))}))", prof)
+        self.assertNotIn(f"file-write* (literal {lit(os.path.realpath(out))})", prof)   # unlink/create: a link there
+        self.assertIn(f"(allow file-write* (subpath {lit(os.path.realpath(scratch))}))", prof)
 
     def test_appcontainer_output_grant_without_delete(self):
         from qraft_ra import isolation
