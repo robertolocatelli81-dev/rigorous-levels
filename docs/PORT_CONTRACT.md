@@ -140,7 +140,12 @@ Object with process-memory, active-process (16) and CPU-time limits, killed on t
 The output file is granted `(R,W)` (no DELETE: with `M` the port removed it). Windows has no file-size rlimit and the
 Job Object no disk limit: the host watchdog caps the scratch folder, the output file and the AppContainer's own
 profile folder (`GetAppContainerFolderPath`, writable by the container and kept between runs: only its growth during
-the run is counted). The container cannot open the NUL device (CI 2026-11-12: `open('nul')` → PermissionError in
+the run is counted). Windows checks the Job's CPU-time limit only periodically (CI 2026-11-12, Python 3.12: a 2 s
+limit was not applied within 7 s), so the watchdog also reads the Job's user time (QueryInformationJobObject) and
+stops the run over `seconds` ("cpu: … (host watchdog)"). Windows rewrites TEMP, TMP and LOCALAPPDATA of an
+AppContainer process to `<LOCALAPPDATA>\Packages\qraft-ra-multiport\AC[\Temp]` under the LOCALAPPDATA passed, which
+here is inside the scratch folder and does not exist (measured in CI 2026-11-12): `tempfile.gettempdir()` then
+falls back to the current folder, the scratch folder. The container cannot open the NUL device (CI 2026-11-12: `open('nul')` → PermissionError in
 dill, imported by scqubits): the runner then points `os.devnull` at an empty file in the scratch folder
 (`QRAFT_DEVNULL`), counted by the disk cap.
 The environment is a closed list: SYSTEMROOT, WINDIR, SYSTEMDRIVE, COMSPEC, PATHEXT copied, PATH = SYSTEMROOT,

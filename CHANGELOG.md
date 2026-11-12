@@ -251,7 +251,23 @@ Test fixes for these platforms: the runner outside the sandbox (positive control
 (WinError 10106 without SYSTEMROOT) and `QRAFT_HOST_LIMITS=memory`; the engine-missing controls make appcontainer
 missing through its Windows API, as it has no executable; the peak-memory check of the stdout test reads
 PeakWorkingSetSize on Windows and bytes (not KiB) on macOS; the disk controls use the runner's `$WORK` and `$TMP` on
-the engines that run on host paths. Not yet confirmed by a CI run when this entry was written.
+the engines that run on host paths.
+
+Measured by the CI (2026-11-12): macOS refuses RLIMIT_AS, RLIMIT_DATA and RLIMIT_RSS alike ("current limit exceeds
+maximum limit"; RLIMIT_FSIZE, RLIMIT_CPU and RLIMIT_NPROC are accepted): the host watchdog is the only memory cap
+there. With these fixes both macOS jobs are green and every sandbox-exec S1–S7 test runs (run 43161023860; the
+scqubits test is skipped there, scqubits is not installed on macOS). Inside the AppContainer `open('nul')` fails in
+`rb`, `wb` and `r+b` (PermissionError), the AppContainer folder is found, and TEMP/TMP/LOCALAPPDATA are rewritten
+by Windows to folders that do not exist (run 43163743554). Then, from run 43163743554:
+
+- Windows, Python 3.12: the 2 s CPU control ended at the 7 s wall-clock timeout: Windows checks the Job's CPU-time
+  limit only periodically. The host watchdog now reads the Job's user time and stops the run over `seconds`.
+- Windows: `python -m qraft_ra.reproduce` stopped with UnicodeEncodeError printing "≤" to the cp1252 console; a
+  character the console cannot encode is now printed as a backslash escape.
+
+Earlier, after run 43162320603 (Windows: `$TMP` gave FileNotFoundError inside the AppContainer), the test ports'
+`$TMP` placeholder follows `tempfile.gettempdir()` (where a solver's temporary files go) and the disk error names the
+folder; the Seatbelt-profile test built POSIX paths that `realpath` changes on Windows (a test defect).
 
 Test and CI fixes: tests that need `pwd`, a `sh` fake interpreter or `SIGALRM` are POSIX-only or use a thread with a
 time limit; the examples get a fresh `USERPROFILE` on Windows (qutip needs a home); scqubits 4.3.1 is not installed

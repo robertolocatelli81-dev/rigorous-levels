@@ -432,6 +432,12 @@ class _SandboxTests:
         else:
             self.assertRegex(u.reason, r"disk: 64 MiB then (OSError|PermissionError)")
         u = self.run_port(request("test_hostile", truncation={"mode": "cpu"}, seconds=2))
+        if self.ENGINE == "appcontainer":                     # the Job's CPU limit or the host reading the Job's CPU time
+            self.assertIn(u.state, ("INVALID", "ERROR"), u)
+            if u.state == "ERROR":
+                self.assertRegex(u.reason, r"^cpu: \d+\.\d s of CPU over the 2 s cap \(host watchdog\)$")
+            self.assertNotIn("timeout", u.reason)             # never the caller's wall-clock timeout
+            return
         self.assertEqual(u.state, "INVALID", u)
         if self.ENGINE == "wasm":                             # no rlimit under WASI: the engine/host timeout is the guard
             self.assertIn("timeout", u.reason)
@@ -717,6 +723,11 @@ class TestCI20261112Watchdog(unittest.TestCase):
         self.assertIn(f"(allow file-write-data (literal {lit(os.path.realpath(out))}))", prof)
         self.assertNotIn(f"file-write* (literal {lit(os.path.realpath(out))})", prof)   # unlink/create: a link there
         self.assertIn(f"(allow file-write* (subpath {lit(os.path.realpath(scratch))}))", prof)
+
+    def test_cpu_reason_of_the_job(self):
+        from qraft_ra import isolation
+        self.assertEqual(isolation.cpu_reason(20_000_000, 2), "")                       # exactly at the cap
+        self.assertEqual(isolation.cpu_reason(23_000_000, 2), "cpu: 2.3 s of CPU over the 2 s cap (host watchdog)")
 
     def test_appcontainer_output_grant_without_delete(self):
         from qraft_ra import isolation

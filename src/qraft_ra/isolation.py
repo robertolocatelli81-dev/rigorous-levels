@@ -137,6 +137,14 @@ def disk_reason(paths: List[str], base: Tuple[int, int] = (0, 0)) -> str:
     return ""
 
 
+def cpu_reason(user_100ns: int, seconds: int) -> str:
+    """appcontainer: the Job Object's user time (100 ns units) over `seconds`, or "". The Job's own time limit is
+    checked by Windows only periodically (CI 2026-11-12, Python 3.12: a 2 s CPU limit was still not applied at 7 s)."""
+    if user_100ns > int(seconds) * 10_000_000:
+        return f"cpu: {user_100ns / 1e7:.1f} s of CPU over the {int(seconds)} s cap (host watchdog)"
+    return ""
+
+
 def _memory_sampler():
     """A function pgid -> bytes resident in the process group (max of resident size and physical footprint on macOS,
     proc_pid_rusage of libproc; VmRSS on Linux), or SandboxMissing if this platform cannot be sampled."""
@@ -686,6 +694,12 @@ def _run_appcontainer_process(ctypes, wintypes, sid, cmdline: str, env: Dict[str
         _fields_ = [(n, ctypes.c_uint64) for n in ("ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
                                                    "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
 
+    class JOBOBJECT_BASIC_ACCOUNTING_INFORMATION(ctypes.Structure):
+        _fields_ = [("TotalUserTime", ctypes.c_int64), ("TotalKernelTime", ctypes.c_int64),
+                    ("ThisPeriodTotalUserTime", ctypes.c_int64), ("ThisPeriodTotalKernelTime", ctypes.c_int64),
+                    ("TotalPageFaultCount", wintypes.DWORD), ("TotalProcesses", wintypes.DWORD),
+                    ("ActiveProcesses", wintypes.DWORD), ("TotalTerminatedProcesses", wintypes.DWORD)]
+
     class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
         _fields_ = [("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION), ("IoInfo", IO_COUNTERS),
                     ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
@@ -742,9 +756,15 @@ def _run_appcontainer_process(ctypes, wintypes, sid, cmdline: str, env: Dict[str
     WAIT_TIMEOUT = 0x102
     deadline = time.monotonic() + seconds + 5
     timed_out, reason = False, ""
+    acct = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION()
     while k32.WaitForSingleObject(pi.hProcess, int(WATCH_INTERVAL * 1000)) == WAIT_TIMEOUT:
-        # no RLIMIT_FSIZE and no tmpfs on Windows: the Job Object has no disk limit, the host watches the writable places
-        reason = disk_reason(disk_paths, base)
+        # no RLIMIT_FSIZE and no tmpfs on Windows: the Job Object has no disk limit, the host watches the writable places;
+        # the Job's CPU-time limit is checked by Windows only periodically: the host reads the Job's user time too
+        if not k32.QueryInformationJobObject(job, 1, ctypes.byref(acct), ctypes.sizeof(acct), None):
+            reason = f"cpu: the job's accounting cannot be read ({ctypes.get_last_error()}): run stopped (host watchdog)"
+        else:
+            reason = cpu_reason(acct.TotalUserTime, seconds)
+        reason = reason or disk_reason(disk_paths, base)
         timed_out = not reason and time.monotonic() > deadline
         if reason or timed_out:
             k32.TerminateJobObject(job, 1)

@@ -25,5 +25,20 @@ class TestEsempioReadme(unittest.TestCase):
         self.assertEqual(out.getvalue(), attese[0])
 
 
+class TestReproduceConsole(unittest.TestCase):
+    """CI 2026-11-12, Windows: `python -m qraft_ra.reproduce` stopped with UnicodeEncodeError printing "≤" to a cp1252
+    console. A console that cannot encode a character gets a backslash escape; the run ends normally."""
+
+    def test_reproduce_on_a_cp1252_console(self):
+        import os
+        import subprocess
+        import sys
+        r = subprocess.run([sys.executable, "-B", "-m", "qraft_ra.reproduce"], capture_output=True, timeout=600,
+                           env=dict(os.environ, PYTHONIOENCODING="cp1252"))
+        self.assertEqual(r.returncode, 0, r.stderr.decode("cp1252", "replace")[-800:])
+        self.assertIn(b"\\u2264", r.stdout)            # the character was there, escaped, not dropped
+        self.assertNotIn(b"UnicodeEncodeError", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

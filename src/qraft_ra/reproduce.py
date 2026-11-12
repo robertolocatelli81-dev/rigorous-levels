@@ -229,7 +229,17 @@ def readme_check() -> List[str]:
     return [f"{name}: {s!r}" for name, published, _, _ in CLAIMS for s in published if s not in text]
 
 
+def _console_safe() -> None:
+    """A console that cannot encode a character (Windows cp1252 and "≤", CI 2026-11-12: UnicodeEncodeError ended the
+    run) prints it as a backslash escape instead of stopping: no claim is lost, none is altered."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="backslashreplace")
+
+
 def main(argv) -> int:
+    _console_safe()
     if argv == ["--readme"]:
         missing = readme_check()
         for m in missing:
