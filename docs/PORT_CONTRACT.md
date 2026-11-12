@@ -123,6 +123,8 @@ exists); read-execute grants (`icacls … /grant *<SID>:(OI)(CI)RX`) on the inte
 the work folder, modify on the output file and a scratch folder; the runner started with
 PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES and no capability (no internetClient: no network), assigned to a Job
 Object with process-memory, active-process (16) and CPU-time limits, killed on timeout (TerminateJobObject).
+The environment is a closed list: SYSTEMROOT, WINDIR, SYSTEMDRIVE, COMSPEC, PATHEXT copied, PATH = SYSTEMROOT,
+USERPROFILE, LOCALAPPDATA, APPDATA, HOME, TEMP, TMP inside the scratch folder, plus the runner's own variables.
 The probe checks network closed, %SystemRoot% not writable, home not listable. The read-execute grants are not
 removed after the run: they stay on those folders for the AppContainer SID `qraft-ra-multiport`. Folders that are a
 user's home, contain one, or are a root (any drive or share) are refused. The owner of the engine is not checked on Windows. Not

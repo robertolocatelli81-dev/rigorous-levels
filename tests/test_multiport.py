@@ -529,6 +529,21 @@ class TestCI20261112Platforms(unittest.TestCase):
         cmd = isolation._container_cmd("podman", "podman", "img", "n", 30, [], "/w", "/w/o.json")
         self.assertNotIn("QRAFT_NPROC=cgroup", cmd)                                   # podman: own user namespace
 
+    def test_appcontainer_environment_has_system_variables_and_no_real_user_folders(self):
+        from qraft_ra import isolation
+        s = tempfile.mkdtemp(prefix="ac_env_")
+        try:
+            env = isolation._appcontainer_base_env(s)
+            for k in ("SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "PATH", "USERPROFILE",
+                      "LOCALAPPDATA", "APPDATA"):
+                self.assertTrue(env.get(k), k)
+            for k in ("USERPROFILE", "LOCALAPPDATA", "APPDATA"):                         # never the real folders
+                self.assertTrue(env[k].startswith(s), (k, env[k]))
+            self.assertEqual(set(env), {"SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "PATH",
+                                        "USERPROFILE", "LOCALAPPDATA", "APPDATA"})        # closed list
+        finally:
+            shutil.rmtree(s, ignore_errors=True)
+
     @unittest.skipUnless(os.name == "posix", "a fake framework layout with POSIX paths")
     def test_macos_framework_binary_allowed_by_the_profile(self):
         from qraft_ra import isolation

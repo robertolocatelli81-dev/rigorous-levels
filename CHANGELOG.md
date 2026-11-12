@@ -219,8 +219,14 @@ green; 5 red. Product defects, each with a test that fails on the tree before it
   `Resources/Python.app/Contents/MacOS/Python` with posix_spawn, which the Seatbelt profile did not allow: the
   sandbox-exec probe failed. That binary is now allowed too (only when it exists next to the interpreter).
 - Windows: CreateProcessW in the AppContainer failed with error 203 (ERROR_ENVVAR_NOT_FOUND) on the GitHub runner;
-  the environment block is now sorted by name as the documentation asks, and the error names the variables passed
-  (names only). Not yet confirmed by a CI run when this entry was written.
+  the environment block is now sorted by name, the error names the variables passed (names only), and the block
+  carries the system variables a process needs (SYSTEMDRIVE, WINDIR, COMSPEC, PATHEXT) and LOCALAPPDATA/APPDATA
+  pointed at the scratch folder. Sorting alone did not fix it (CI run 43156458790). Not yet confirmed by a CI run
+  when this entry was written.
+- macOS: the sandbox-exec probe asked `os.path.isdir(home)`, which needs only file metadata, allowed everywhere by
+  the profile: a false "does not isolate". It now tries to list the home (file-read-data, denied there).
+- CI: the check that each engine's S1 test ran matched only the test name format of Python 3.11+; on 3.10 it failed
+  although the test had passed. It now matches both formats and still refuses a skipped test.
 
 Test and CI fixes: tests that need `pwd`, a `sh` fake interpreter or `SIGALRM` are POSIX-only or use a thread with a
 time limit; the examples get a fresh `USERPROFILE` on Windows (qutip needs a home); scqubits 4.3.1 is not installed

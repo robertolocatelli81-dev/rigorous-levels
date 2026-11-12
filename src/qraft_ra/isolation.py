@@ -404,7 +404,10 @@ def _probe_sandbox_exec() -> Dict[str, object]:
                     "try:\n    socket.create_connection(('127.0.0.1', 9), timeout=1); net = 'open'\n"
                     "except OSError as e:\n    net = type(e).__name__\n"
                     "try:\n    open('/usr/qraft_probe', 'w').close(); root_ro = False\nexcept OSError:\n    root_ro = True\n"
-                    "print(json.dumps({'net': net, 'root_ro': root_ro, 'home': os.path.isdir(sys.argv[1])}))\n")
+                    # listing the home needs file-read-data, which the profile denies there; os.path.isdir needs
+                    # only file-read-metadata, allowed everywhere (CI 2026-11-12: isdir gave True, a false alarm)
+                    "try:\n    os.listdir(sys.argv[1]); home = True\nexcept OSError:\n    home = False\n"
+                    "print(json.dumps({'net': net, 'root_ro': root_ro, 'home': home}))\n")
         out = os.path.join(scratch, "out.txt")
         prof = seatbelt_profile(sys.executable, [sys.base_prefix, sys.prefix, scratch], out, scratch)
         pf = os.path.join(scratch, "profile.sb")
@@ -583,6 +586,21 @@ def _run_appcontainer_process(ctypes, wintypes, sid, cmdline: str, env: Dict[str
     return (None if timed_out else int(code.value)), timed_out
 
 
+def _appcontainer_base_env(scratch: str) -> Dict[str, str]:
+    """The Windows variables a process needs to start (CI 2026-11-12: CreateProcessW in the AppContainer failed with
+    203, ERROR_ENVVAR_NOT_FOUND, with only SYSTEMROOT and PATH among them): system ones copied from this process
+    (SYSTEMROOT, SYSTEMDRIVE, WINDIR, COMSPEC, PATHEXT: no user data), the per-user folders pointed at the scratch
+    folder (USERPROFILE, LOCALAPPDATA, APPDATA: never the real ones). Nothing else of the session is passed."""
+    root = os.environ.get("SYSTEMROOT", r"C:\Windows")
+    env = {"SYSTEMROOT": root, "WINDIR": os.environ.get("WINDIR", root), "PATH": root,
+           "SYSTEMDRIVE": os.environ.get("SYSTEMDRIVE", root[:2]),
+           "COMSPEC": os.environ.get("COMSPEC", os.path.join(root, "System32", "cmd.exe")),
+           "PATHEXT": os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD"),
+           "USERPROFILE": os.path.join(scratch, "nohome"), "LOCALAPPDATA": os.path.join(scratch, "localappdata"),
+           "APPDATA": os.path.join(scratch, "appdata")}
+    return env
+
+
 def _probe_appcontainer() -> Dict[str, object]:
     ctypes, wintypes = _win()
     sid, sid_str = _appcontainer_sid(ctypes, wintypes, "qraft-ra-multiport")
@@ -603,8 +621,7 @@ def _probe_appcontainer() -> Dict[str, object]:
                     "try:\n    os.listdir(sys.argv[1]); home = True\nexcept OSError:\n    home = False\n"
                     "open(sys.argv[2], 'w').write(json.dumps({'net': net, 'root_ro': root_ro, 'home': home}))\n")
         out = os.path.join(scratch, "out.json")
-        env = {"SYSTEMROOT": os.environ.get("SYSTEMROOT", r"C:\Windows"), "PATH": os.environ.get("SYSTEMROOT", r"C:\Windows"),
-               "USERPROFILE": os.path.join(scratch, "nohome"), "HOME": os.path.join(scratch, "nohome"),
+        env = {**_appcontainer_base_env(scratch), "HOME": os.path.join(scratch, "nohome"),
                "TEMP": scratch, "TMP": scratch, "PYTHONDONTWRITEBYTECODE": "1"}
         cmdline = subprocess.list2cmdline([sys.executable, "-I", "-S", "-B", probe, home, out])
         rc, timed_out = _run_appcontainer_process(ctypes, wintypes, sid, cmdline, env, scratch, 60, 1024,
@@ -639,8 +656,7 @@ def _run_appcontainer(work: str, out_path: str, seconds: int, mem_mib: int, site
     scratch = tempfile.mkdtemp(prefix="qraft_ac_")
     _icacls(scratch, sid_str, "M")
     try:
-        env = {"SYSTEMROOT": os.environ.get("SYSTEMROOT", r"C:\Windows"), "PATH": os.environ.get("SYSTEMROOT", r"C:\Windows"),
-               "USERPROFILE": os.path.join(scratch, "nohome"), "HOME": os.path.join(scratch, "nohome"),
+        env = {**_appcontainer_base_env(scratch), "HOME": os.path.join(scratch, "nohome"),
                "TEMP": scratch, "TMP": scratch, "PYTHONDONTWRITEBYTECODE": "1", "OMP_NUM_THREADS": "1",
                "OPENBLAS_NUM_THREADS": "1", "QRAFT_OUTPUT_DIR": os.path.dirname(out_path)}
         cmdline = subprocess.list2cmdline([python, "-I", "-S", "-B", os.path.join(work, RUNNER_NAME), work])
