@@ -66,6 +66,28 @@ OUTWARDS to 24 significant digits (float64 is not enough: at |E| ≈ 1e6 GHz one
 2. H is the one of the exact float64 parameters: 0.1 is 0.1000000000000000055…
 3. Arb/FLINT rounds its balls correctly: a declared assumption, not proven here. No formal verification (Coq/Lean).
 
+## Where the float numbers enter, and why the ends are the same on every machine (0.3.0)
+
+Float estimates of the eigenvalues (and, for the matrix elements, of the eigenvectors) choose the points at which the
+exact counts are taken: they enter no bound, but the ends of a published interval ARE such points (the fluxonium,
+sphere, molecule and Mathieu modules centre the trial interval on the estimate; the rotor bisects from it; the matrix
+element is built on the float eigenvector). Until 2026-11-12 the estimates came from numpy/scipy (`eigvalsh`,
+`eig_banded`, `eigvalsh_tridiagonal`), whose last bits depend on the BLAS/LAPACK kernel: the published ends changed
+with `OPENBLAS_CORETYPE` and between CI machines, while staying correct.
+
+Since then every estimate comes from `qraft_ra._deterministic`, which uses only Python float operations whose result
+IEEE 754 fixes bit for bit (+, −, ×, ÷, comparisons, `math.sqrt`, `math.fsum`, `math.ldexp`/`frexp`, `float()` of an
+int or a Fraction) in a fixed order: bisection on the Sturm count (tridiagonal), Householder reduction then the same
+bisection (dense), bisection on the LDLᵀ inertia (band), inverse iteration with banded partial pivoting from a fixed
+start vector (eigenvectors; sign fixed by the largest entry). No BLAS/LAPACK, no libm transcendental, no builtin
+`sum()` of floats (its algorithm changed in Python 3.12). The other float decisions (initial cut, basis growth, α)
+use the same operations. Hence the ends depend only on the inputs, on this code and on python-flint (Arb's balls).
+
+Assumptions, declared: binary64 with round-to-nearest and no flush-to-zero (every 64-bit platform CPython supports;
+a library loaded in the same process that turns on flush-to-zero would change subnormal results); python-flint at the
+pinned version (another version may round a radius differently). Measured on 2026-11-12: README, "Tests,
+reproduction, determinism".
+
 ## Sources
 
 - G. Teschl, *Mathematical Methods in Quantum Mechanics*, 2nd ed., AMS GSM 157 (2014). Online version
@@ -130,8 +152,9 @@ a_{2n+1} / b_{2n+1}; b_{2n+2} starts at k = 1. The three steps above apply on ea
 - Counts: the squares of the off-diagonal entries (q², 2q²) are exact rationals, so the tridiagonal LDLᵀ runs in Arb
   on exact data; uncertain pivots raise the precision or move the point.
 
-Measured (2026-11-11, bench/mathieu_vs_scipy.py): r ≤ 12, q = −400…400 step 0.5, 40 025 values, 40 019
-GUARANTEED at 1e-12 relative width (6 WIDE: valid, wider), median 0.38 ms; a_r(0) = b_r(0) = r² contained for
+Measured (2026-11-12, bench/mathieu_vs_scipy.py, deterministic estimates): r ≤ 12, q = −400…400 step 0.5, 40 025
+values, 40 025 GUARANTEED at 1e-12 relative width (0 WIDE; 6 WIDE on 2026-11-11 with the LAPACK estimates), median
+0.50 ms; a_r(0) = b_r(0) = r² contained for
 r ≤ 50; DLMF 28.2.3–4 symmetries; the sorted levels of the charge-basis rotor (E_C = 1, n_g = ν/2, 2q cos φ: a
 different code path) meet the sector intervals in the order a_0 < b_2 < a_2 < … and b_1 < a_1 < b_3 < …;
 scipy 1.17.1/1.18.1: 52 values outside, all confirmed wrong by an independent tridiagonal reference (K = 400).
@@ -154,8 +177,8 @@ operator D(iφ_zpf)); built in Arb from the exact rationals 2E_C/E_L and 8E_LE_C
   where the low eigenvectors are negligible, so λ_j(PHP) − λ_j(PHP − diag r) shrinks super-exponentially with N.
 - Counts: dense LDLᵀ in Arb (N ≤ 240).
 
-Measured (2026-11-11, bench/fluxonium_devices.py, scqubits 4.3.1): four published parameter sets, 4 levels, width
-5e-10 GHz, N = 54…117, 0.4–6.5 s; scqubits `Fluxonium(cutoff=110)` inside every interval, `cutoff=6` outside in at
+Measured (2026-11-12, bench/fluxonium_devices.py, scqubits 4.3.1): four published parameter sets, 4 levels, width
+5e-10 GHz, N = 54…117, 0.34–6.0 s; scqubits `Fluxonium(cutoff=110)` inside every interval, `cutoff=6` outside in at
 least one level (negative control); with a vanishing E_J the levels are ω(j+½) (exact control).
 
 ## Parameters as intervals (0.3.0)

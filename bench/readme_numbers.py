@@ -96,7 +96,7 @@ def main(full):
         b, t3 = ms(lambda: spectrum(r, K, 1e-11))
         for k, v in zip(t, (t0, t1, t2, t3)):
             t[k].append(v)
-        assert a.state == OK and b.state == OK
+        assert a.state in (OK, SA.OK_FLOAT_FLOOR) and b.state == OK    # OK_FLOAT_FLOOR: state added in 0.3.0
         ea, eb = np.array(a.energies), np.array(b.energies)
         diff_tr = max(diff_tr, float(np.max(np.abs((ea - ea[0]) - (eb - eb[0])))))
     res["device_regime"] = {"cases": 200, "max_diff_transitions_GHz": diff_tr,
@@ -109,7 +109,7 @@ def main(full):
         bare = np.asarray(sq.Transmon(EJ=ej, EC=1.0, ng=ng, ncut=30, truncated_dim=K).eigenvals(evals_count=K))
         dbl = SA.scqubits_spectrum(r, K, 30, check="doubling")
         aut = SA.scqubits_spectrum(r, K, 30, check="auto")
-        rows.append({"ej": ej, "wrong": wrong(bare, ref), "flag": dbl.state != OK, "auto_wrong": wrong(aut.energies, ref)})
+        rows.append({"ej": ej, "wrong": wrong(bare, ref), "flag": dbl.state not in (OK, SA.OK_FLOAT_FLOOR), "auto_wrong": wrong(aut.energies, ref)})
     w = [x for x in rows if x["wrong"]]
     res["wide_range_ncut30"] = {"cases": 200, "wrong_silently": len(w),
                                 "smallest_EJ_EC_wrong": min((x["ej"] for x in w), default=None),

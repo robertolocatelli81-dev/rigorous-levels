@@ -31,9 +31,9 @@ from fractions import Fraction
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-from scipy.linalg import eig_banded
 
 from qraft_ra._compat import add_field_aliases, deprecated_function
+from qraft_ra._deterministic import band_eigenvector, band_lowest
 
 K_MAX = 20            # largest number of levels
 M_MAX = 24            # largest harmonic m (raised from 8 to 24 on 2026-11-09)
@@ -193,34 +193,37 @@ def _arb_from_fraction(flint, f: Fraction):
     return arb(f.numerator) / arb(f.denominator)
 
 
-def _float_estimates(diag, bande, k: int) -> np.ndarray:
-    w = max(bande, default=0)
+def _float_bands(diag, bande) -> Tuple[List[float], Dict[int, List[float]]]:
     n = len(diag)
-    ab = np.zeros((w + 1, n))
-    ab[w, :] = [float(d) for d in diag]
-    for m, b in bande.items():
-        ab[w - m, m:] = float(b)
-    return eig_banded(ab, lower=False, eigvals_only=True, select="i", select_range=(0, k - 1))
+    return [float(d) for d in diag], {m: [float(b)] * (n - m) for m, b in bande.items() if m < n}
+
+
+def _float_estimates(diag, bande, k: int) -> np.ndarray:
+    """The k lowest eigenvalues of the band matrix, in floats that are the same on every machine (_deterministic:
+    no BLAS/LAPACK; the array only holds them). Only to choose points: they enter no bound."""
+    d, b = _float_bands(diag, bande)
+    return np.array(band_lowest(d, b, k))
 
 
 def _first_order_shift(diag_su, diag_giu, bande, k: int) -> float:
-    """max_j Σ_i v_j(i)² (d_i − d_i′), with v_j the float eigenvectors of H_N: estimate of λ_j(H_N) − λ_j(H_N′)
-    without subtracting two large eigenvalues. Only for the filter: it enters no bound."""
-    w = max(bande, default=0)
-    n = len(diag_su)
-    ab = np.zeros((w + 1, n))
-    ab[w, :] = [float(d) for d in diag_su]
-    for m, b in bande.items():
-        ab[w - m, m:] = float(b)
-    _, V = eig_banded(ab, lower=False, select="i", select_range=(0, k - 1))
-    dd = np.array([float(a - b) for a, b in zip(diag_su, diag_giu)])
-    return float(np.max((V ** 2 * dd[:, None]).sum(axis=0)))
+    """max_j Σ_i v_j(i)² (d_i − d_i′), with v_j float eigenvectors of H_N (inverse iteration at the k lowest
+    estimates, _deterministic): estimate of λ_j(H_N) − λ_j(H_N′) without subtracting two large eigenvalues. Only for
+    the filter: it enters no bound."""
+    d, b = _float_bands(diag_su, bande)
+    dd = [float(a - c) for a, c in zip(diag_su, diag_giu)]
+    best = 0.0
+    for lam in band_lowest(d, b, k):
+        v = band_eigenvector(d, b, lam)
+        x = math.fsum(vi * vi * di for vi, di in zip(v, dd) if di != 0.0)
+        if x > best:
+            best = x
+    return best
 
 
 def _enclose(flint, diag, bande, k: int, target: Fraction, prec: int, deadline):
     """For j < k, exact (a_j, b_j) with #eigenvalues<a_j ≤ j and #eigenvalues<b_j ≥ j+1, hence a_j ≤ λ_j < b_j."""
     cache: Dict[int, tuple] = {}
-    norma = max(abs(float(d)) for d in diag) + 2 * sum(abs(float(b)) for b in bande.values())
+    norma = max(abs(float(d)) for d in diag) + 2 * math.fsum(abs(float(b)) for b in bande.values())
     stime = _float_estimates(diag, bande, k)
     delta0 = Fraction(max(1e3 * 2.2e-16 * len(diag) * max(norma, 1.0), 1e-9))
     low, high = [], []
@@ -348,10 +351,10 @@ def guaranteed_levels(r, k: int = 6, width: float = 1e-12, *, deadline: Optional
     flint = _flint()
     t0 = time.perf_counter()
     deadline = None if deadline is None else t0 + float(deadline)
-    U = sum(abs(c) for _, c in r.cosines)
+    U = math.fsum(abs(c) for _, c in r.cosines)
     absng = abs(Fraction(r.n_g))
     if N_initial is None:
-        N = int(math.ceil(abs(r.n_g))) + max(12, int(6 * (max(U, r.E_C) / r.E_C) ** 0.25 * math.sqrt(k + 1)))
+        N = int(math.ceil(abs(r.n_g))) + max(12, int(6 * math.sqrt(math.sqrt(max(U, r.E_C) / r.E_C)) * math.sqrt(k + 1)))
     else:
         N = int(N_initial)
     N = max(N, int(math.ceil(abs(r.n_g))), (k + 1) // 2)

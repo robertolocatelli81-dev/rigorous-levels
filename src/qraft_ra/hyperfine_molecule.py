@@ -52,6 +52,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from qraft_ra._compat import add_field_aliases
+from qraft_ra._deterministic import dense_lowest
 from qraft_ra.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint
 
 __all__ = ["SigmaMolecule", "guaranteed_molecule_levels", "transition", "sector_dimension", "zeeman_hz",
@@ -348,7 +349,7 @@ def _arb_of(fl, t: Terms):
 
 
 def _float_of(t: Terms) -> float:
-    return sum(float(c) * math.sqrt(float(q)) for c, q in t)
+    return math.fsum(float(c) * math.sqrt(float(q)) for c, q in t)
 
 
 def _count_below_banded(fl, diag, off: Dict[Tuple[int, int], object], w: int, x) -> Optional[int]:
@@ -475,12 +476,13 @@ def _outer_bound(fl, m: SigmaMolecule, dMF: int, L: int, normV):
 
 
 def _approximate(states, el, k: int) -> np.ndarray:
-    """Only to choose the trial points: it enters no proof."""
+    """Only to choose the trial points: it enters no proof. Dense Householder + Sturm bisection in floats
+    (_deterministic): the same numbers on every machine."""
     n = len(states)
-    M = np.zeros((n, n))
+    M = [[0.0] * n for _ in range(n)]
     for (i, j), t in el.items():
-        M[i, j] = M[j, i] = _float_of(t)
-    return np.linalg.eigvalsh(M)[:k]
+        M[i][j] = M[j][i] = _float_of(t)
+    return np.array(dense_lowest(M, k))
 
 
 def _attempt(fl, m: SigmaMolecule, dMF: int, k: int, width: float, L: int, dl):

@@ -38,6 +38,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from qraft_ra._deterministic import dense_lowest
 from qraft_ra.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint, _refuse_overflow
 from qraft_ra.hyperfine_molecule import _count_below_banded
 
@@ -83,7 +84,7 @@ class Fluxonium:
 
     @property
     def phi_zpf(self) -> float:
-        return (2.0 * self.E_C / self.E_L) ** 0.25
+        return math.sqrt(math.sqrt(2.0 * self.E_C / self.E_L))       # sqrt is correctly rounded: no libm pow
 
 
 def _fmpq(fl, f: Fraction):
@@ -183,8 +184,8 @@ def _attempt(fl, f: Fluxonium, k: int, width: float, N: int, N2: int, dl: Option
     diag = [omega * (m + half) - EJa * C[m, m] for m in range(N)]
     diagB = [diag[i] - r[i] for i in range(N)]
     off = {(i, j): -EJa * C[i, j] for i in range(N) for j in range(i)}
-    A = np.array([[float(diag[i]) if i == j else float(-EJa * C[i, j]) for j in range(N)] for i in range(N)])
-    approx = np.linalg.eigvalsh(A)[:k]
+    A = [[float(diag[i]) if i == j else float(-EJa * C[i, j]) for j in range(N)] for i in range(N)]
+    approx = dense_lowest(A, k)                                      # same floats on every machine (_deterministic)
     low, high = [], []
     for j in range(k):
         delta = width / 4
@@ -233,7 +234,7 @@ def guaranteed_fluxonium_levels(f: Fluxonium, k: int = 6, width: float = 1e-10, 
     t0 = time.perf_counter()
     dl = None if deadline is None else t0 + deadline
     if N_initial is None:
-        N = max(2 * k + 12, int(6 * f.phi_zpf ** 2) + 16)
+        N = max(2 * k + 12, int(6 * phi2) + 16)
     else:
         if isinstance(N_initial, bool) or not isinstance(N_initial, int) or N_initial < k + 2:
             raise OutOfDomain(f"N_initial: expected an integer >= {k + 2}")
@@ -248,7 +249,7 @@ def guaranteed_fluxonium_levels(f: Fluxonium, k: int = 6, width: float = 1e-10, 
                 if dl is not None and time.perf_counter() > dl:
                     raise DeadlineExceeded(f"deadline of {deadline} s exceeded at N = {N}")
                 fl.ctx.prec = p
-                res = _attempt(fl, f, k, width, N, max(40, int(2.5 * math.sqrt(float(f.phi_zpf ** 2) * N)) + 8), dl)
+                res = _attempt(fl, f, k, width, N, max(40, int(2.5 * math.sqrt(phi2 * N)) + 8), dl)
                 if res is not None:
                     low, high, b = res
                     w = max(float(a - c) for a, c in zip(high, low))

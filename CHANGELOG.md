@@ -277,6 +277,49 @@ Test and CI fixes: tests that need `pwd`, a `sh` fake interpreter or `SIGALRM` a
 time limit; the examples get a fresh `USERPROFILE` on Windows (qutip needs a home); scqubits 4.3.1 is not installed
 on macOS, where it requires scipy ≤ 1.13.1 (its scqubits tests are skipped there with the reason).
 
+### Determinism of the published ends (2026-11-12)
+
+Defect, measured on 2026-11-12 (commit f9867d8, Python 3.11.2–3.14.8, Linux x86-64 with AVX2): `reproduce --hash`
+gave c3ae60dd… with `OPENBLAS_CORETYPE` Haswell or unset, adfa1368… with Prescott and b99bed48… with Nehalem; in CI
+the Linux x86-64 runners alternated between two values and ARM64, macOS and Windows each gave another. Cause: the
+float estimates that choose where the exact counts are taken came from numpy/scipy (`eigvalsh`, `eig_banded`,
+`eigvalsh_tridiagonal`), whose last bits depend on the BLAS/LAPACK kernel, and the ends of the published intervals
+are built from those points (fluxonium, sphere, molecule and Mathieu centre the trial interval on the estimate; the
+matrix elements use the float eigenvectors). The intervals were correct on every machine, but not the same. A seeded
+probe of 309 inputs over all the guaranteed modules (`gen.py` in the author's report) gave different strings under
+Prescott in 29 of them on the code before (8 of 8 fluxonium, 6 of 6 molecule, 15 of 15 matrix elements); the rotor,
+sphere and Mathieu cases of the probe happened to agree.
+
+- New `qraft_ra._deterministic`: eigenvalue estimates by bisection on the Sturm count (tridiagonal), Householder then
+  the same bisection (dense), bisection on the LDLᵀ inertia (band), and eigenvectors by inverse iteration with banded
+  partial pivoting from a fixed start vector (sign fixed by the largest entry), using only Python float operations
+  whose result IEEE 754 fixes (+ − × ÷, `math.sqrt`, `math.fsum`, `ldexp`/`frexp`, `float()` of an int or a Fraction)
+  in a fixed order. No BLAS/LAPACK, no libm transcendental, no builtin `sum()` of floats (changed in Python 3.12).
+- Every guaranteed module uses it: `guaranteed_intervals` (estimates and the first-order filter of the basis growth),
+  `spherical_rotor`, `hyperfine_molecule`, `mathieu`, `fluxonium`, `matrix_elements`. The other float decisions use
+  the same operations: the initial cut of the rotor and the fluxonium (`** 0.25` → two `math.sqrt`), `sum` of floats
+  → `math.fsum`; `Fluxonium.phi_zpf` is now √√(2E_C/E_L) by `math.sqrt` (the last bit may differ from before).
+- The bisection runs to adjacent floats: as a side effect the Mathieu grid r ≤ 12, |q| ≤ 400 step 0.5 has 0 WIDE
+  values of 40 025 (6 before).
+- `reproduce --hash` covers three more enclosures (a rotor with cos φ and cos 2φ, its ⟨0|cos φ|1⟩, an RbCs hyperfine
+  sector); `reproduce.determinism_parts()` returns them by name.
+- `tests/test_determinism.py`: the strings of every hash entry (python-flint 0.9.0; another version is skipped with
+  the reason), the fluxonium ends spelled out, the same guaranteed intervals in fresh interpreters under
+  `OPENBLAS_CORETYPE` unset, Prescott and Nehalem (where numpy runs on run-time-dispatched OpenBLAS on x86-64;
+  skipped elsewhere with the reason), no numpy/scipy eigen-solver called by any guaranteed entry point, and the
+  estimators against numpy on seeded matrices. On the code before, the cross-kernel test and the fluxonium test fail
+  by assertion (the other four by ImportError of the new names); with numpy's `eigvalsh` put back into the fluxonium
+  module (positive control) four of six fail.
+- The CI runs `test_determinism` in every job and the free-threaded job prints the hash too.
+- Measured after the change (2026-11-12): the same hash on Python 3.11.2, 3.12.15, 3.13.15, 3.14.8 × `OPENBLAS_CORETYPE`
+  unset/Haswell/Prescott/Nehalem (16 of 16 runs); the probe of 309 inputs identical under the three kernels and on
+  Python 3.12 and 3.14. Times (README): a Mathieu value 0.38 → 0.50 ms median, the real-transmon bench 5.6 → 8.7 s
+  (the cos 8φ fits use the band bisection), the sphere 0.36 → 0.51 ms; the other benches changed by −9 % to +11 %.
+
+Also: `bench/readme_numbers.py` stopped with AssertionError on the state OK_FLOAT_FLOOR (added in 0.3.0) and counted
+it as a flag; it now accepts it as an OK state. The watchdog test of the multiport expected the exact size the host
+watchdog samples during a 6 MiB write ("6 MiB"); under load it saw 5 MiB: the test now accepts 4–6 MiB.
+
 ## 0.2.0 — 2026-11-11 (local, unreleased)
 
 Added (every module carries its proof or its measurement in the docstring; identifiers, states and the docstrings of the

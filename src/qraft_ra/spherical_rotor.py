@@ -38,6 +38,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from qraft_ra._compat import add_field_aliases
+from qraft_ra._deterministic import tridiagonal_lowest
 from qraft_ra.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint
 
 __all__ = ["SphericalRotor", "guaranteed_sphere_levels", "transition", "OutOfDomain", "ArbMissing", "DeadlineExceeded"]
@@ -104,12 +105,13 @@ def _c2(N: int, M: int) -> Fraction:
 
 
 def _approximate(r: SphericalRotor, L: int, k: int) -> np.ndarray:
-    """Only to choose the trial points: it enters no proof."""
-    Ns = np.arange(abs(r.M), L + 1)
-    c = np.sqrt([float(_c2(int(N), r.M)) for N in Ns[:-1]])
-    x = Ns * (Ns + 1.0)
-    T = np.diag(r.B * x - r.Dc * x * x) - r.dE * (np.diag(c, 1) + np.diag(c, -1))
-    return np.linalg.eigvalsh(T)[:k]
+    """Only to choose the trial points: it enters no proof. The tridiagonal is rounded from its exact entries and
+    solved by Sturm bisection in floats (_deterministic): the same numbers on every machine."""
+    B, Dc, dE2 = Fraction(r.B), Fraction(r.Dc), Fraction(r.dE) ** 2
+    M = abs(r.M)
+    d = [float(B * (N * (N + 1)) - Dc * (N * (N + 1)) ** 2) for N in range(M, L + 1)]
+    e2 = [float(dE2 * _c2(N, r.M)) for N in range(M, L)]
+    return np.array(tridiagonal_lowest(d, e2, k))
 
 
 def _ball(fl, x):

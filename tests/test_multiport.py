@@ -785,7 +785,9 @@ class TestCI20261112Watchdog(unittest.TestCase):
                     f"open({os.path.join(d, 'big')!r}, 'wb').write(b'0' * (6 << 20))\n")
             with mock.patch.object(isolation, "FILE_CAP", 4 << 20):
                 rc, to, why = isolation.run_watched([sys.executable, "-c", code], 30, err, {}, 0, [d])
-            self.assertRegex(why, r"^disk: a file of 6 MiB over the 4 MiB cap \(host watchdog\)$")
+            # the watchdog samples while the 6 MiB write is in progress: it may see 4.x or 5 MiB (measured 2026-11-12
+            # under load: "5 MiB"); what is checked is the cap being enforced, not the sampling instant
+            self.assertRegex(why, r"^disk: a file of [4-6] MiB over the 4 MiB cap \(host watchdog\)$")
             out = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True, text=True).stdout
             self.assertNotIn("time.sleep(60)", out)                          # the fork was killed with the group
         finally:

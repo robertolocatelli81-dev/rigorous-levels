@@ -61,7 +61,7 @@ jobs:
           ulimit -s
           cd tests
           python -c 'import qraft_ra; assert "site-packages" in qraft_ra.__file__, qraft_ra.__file__; print(qraft_ra.__file__)'
-          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_readme_example test_spherical_rotor test_hyperfine_molecule test_inputs_review test_duffing_vs_transmon test_multiport test_port_centrex_tlf test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases test_spec_bounds 2>&1 | tee ../unittest.log
+          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_readme_example test_spherical_rotor test_hyperfine_molecule test_inputs_review test_duffing_vs_transmon test_multiport test_port_centrex_tlf test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases test_spec_bounds test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           for e in bwrap podman docker; do grep -qE "^test_s1_rete_bloccata \\(test_multiport\\.TestSandbox_$e(\\.test_s1_rete_bloccata)?\\) \\.\\.\\. ok" ../unittest.log || { echo "engine $e: the S1 test did not run"; exit 1; }; done
       - name: Deprecated Italian aliases are the only source of DeprecationWarning (the English API is warning-free)
@@ -103,7 +103,7 @@ jobs:
           python -m pip install -r requirements/ci.txt
           python -m pip install --no-deps .
           cd tests
-          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_spherical_rotor test_hyperfine_molecule test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_generative_inputs test_spec_bounds 2>&1 | tee ../unittest.log
+          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_spherical_rotor test_hyperfine_molecule test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_generative_inputs test_spec_bounds test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           for e in bwrap docker; do grep -qE "^test_s1_rete_bloccata \\(test_multiport\\.TestSandbox_$e(\\.test_s1_rete_bloccata)?\\) \\.\\.\\. ok" ../unittest.log || { echo "engine $e: the S1 test did not run"; exit 1; }; done
           cd .. && python -m qraft_ra.reproduce && echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (linux-arm, python ${{ matrix.python }})"
@@ -156,7 +156,7 @@ jobs:
           python -m pip install -r requirements/ci.txt
           python -m pip install --no-deps .
           cd tests
-          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_spherical_rotor test_hyperfine_molecule test_duffing_vs_transmon test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases test_spec_bounds 2>&1 | tee ../unittest.log
+          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_spherical_rotor test_hyperfine_molecule test_duffing_vs_transmon test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases test_spec_bounds test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           grep -qE "^test_s1_rete_bloccata \\(test_multiport\\.TestSandbox_sandbox_exec(\\.test_s1_rete_bloccata)?\\) \\.\\.\\. ok" ../unittest.log || { echo "sandbox-exec: the S1 test did not run"; exit 1; }
           cd .. && python -m qraft_ra.reproduce && echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (macos, python ${{ matrix.python }})"
@@ -215,7 +215,7 @@ jobs:
           python -m pip install -r requirements/ci.txt
           python -m pip install --no-deps .
           cd tests
-          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_spherical_rotor test_hyperfine_molecule test_duffing_vs_transmon test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases test_spec_bounds 2>&1 | tee ../unittest.log
+          python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_spherical_rotor test_hyperfine_molecule test_duffing_vs_transmon test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases test_spec_bounds test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           grep -qE "^test_s1_rete_bloccata \\(test_multiport\\.TestSandbox_appcontainer(\\.test_s1_rete_bloccata)?\\) \\.\\.\\. ok" ../unittest.log || { echo "appcontainer: the S1 test did not run"; exit 1; }
           cd .. && python -m qraft_ra.reproduce && echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (windows, python ${{ matrix.python }})"
@@ -239,5 +239,6 @@ jobs:
       - name: Tests (modules whose dependency is missing are skipped with the reason)
         run: |
           cd tests
-          python -B -m unittest -v test_rotor_spectrum test_guaranteed_intervals test_spherical_rotor test_mathieu test_fluxonium test_generative_inputs 2>&1 | tee ../unittest.log
+          python -B -m unittest -v test_rotor_spectrum test_guaranteed_intervals test_spherical_rotor test_mathieu test_fluxonium test_generative_inputs test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
+          cd .. && if python -c "import flint" 2>/dev/null; then echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (free-threaded 3.14t, python-flint $(python -c 'import flint; print(flint.__version__)'))"; else echo "determinism hash: not computed (python-flint has no wheel here)"; fi

@@ -40,8 +40,8 @@ from fractions import Fraction
 from typing import Optional, Tuple
 
 import numpy as np
-from scipy.linalg import eigvalsh_tridiagonal
 
+from qraft_ra._deterministic import tridiagonal_lowest
 from qraft_ra.guaranteed_intervals import ArbMissing, DeadlineExceeded, OutOfDomain, _finite, _flint, _refuse_overflow
 from qraft_ra.spherical_rotor import _ball, _count_below
 
@@ -116,9 +116,9 @@ def _matrix(kind: str, nu: int, k0: int, K: int, q: Fraction):
 
 
 def _estimate(diag, off2, n: int) -> float:
-    d = np.array([float(x) for x in diag])
-    e = np.sqrt(np.array([float(x) for x in off2])) if off2 else np.zeros(0)
-    return float(eigvalsh_tridiagonal(d, e, select="i", select_range=(n, n))[0])
+    """λ_n of the sector matrix rounded to floats, by Sturm bisection (_deterministic: the same float on every
+    machine). Only to choose the trial points."""
+    return tridiagonal_lowest([float(x) for x in diag], [float(x) for x in off2], n + 1, first=n)[0]
 
 
 def _attempt(fl, kind: str, nu: int, k0: int, n: int, q: Fraction, K: int, width: float):

@@ -34,8 +34,8 @@ from fractions import Fraction
 from typing import Dict, Optional, Tuple
 
 import numpy as np
-from scipy.linalg import eig_banded
 
+from qraft_ra._deterministic import band_eigenvector, band_lowest
 from qraft_ra.guaranteed_intervals import GUARANTEED, Intervals, OutOfDomain, guaranteed_levels
 from qraft_ra.rotor_spectrum import InputRejected, Rotor
 
@@ -81,16 +81,19 @@ def _sqrt_lower(x: Fraction) -> Fraction:
 
 
 def _vectors(r: Rotor, N: int, k: int):
-    """Float eigenvectors of H_N (eig_banded), as dicts n -> Fraction (exact values of the float entries)."""
-    ns = np.arange(-N, N + 1)
-    dim = len(ns)
-    w = max((m for m, _ in r.cosines), default=0)
-    ab = np.zeros((w + 1, dim))
-    ab[w, :] = 4.0 * r.E_C * (ns - r.n_g) ** 2
-    for m, c in r.cosines:
-        ab[w - m, m:] = c / 2.0
-    _, V = eig_banded(ab, lower=False, select="i", select_range=(0, k - 1))
-    return [{int(n): Fraction(float(V[t, j])) for t, n in enumerate(ns) if V[t, j] != 0.0} for j in range(k)]
+    """Float eigenvectors of H_N, as dicts n -> Fraction (exact values of the float entries): bisection estimates of
+    the k lowest eigenvalues, then inverse iteration, in floats that are the same on every machine (_deterministic:
+    no BLAS/LAPACK; sign fixed by the largest entry > 0). They enter the bound only through the exact residual."""
+    EC, ng = Fraction(r.E_C), Fraction(r.n_g)
+    ns = range(-N, N + 1)
+    dim = 2 * N + 1
+    diag = [float(4 * EC * (n - ng) ** 2) for n in ns]
+    bands = {m: [c / 2.0] * (dim - m) for m, c in r.cosines if c != 0.0 and m < dim}
+    out = []
+    for lam in band_lowest(diag, bands, k):
+        v = band_eigenvector(diag, bands, lam)
+        out.append({n: Fraction(x) for n, x in zip(ns, v) if x != 0.0})
+    return out
 
 
 def _apply_H(r: Rotor, v: Dict[int, Fraction]) -> Dict[int, Fraction]:

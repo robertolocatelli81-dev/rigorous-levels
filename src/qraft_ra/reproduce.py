@@ -89,8 +89,8 @@ def _a11():
         return ok, v.strings[0][:12]
 
 
-@claim("Mathieu grid r ≤ 12, q = −400…400 step 0.5: 40 025 values, 40 019 GUARANTEED, 6 WIDE; scipy 1.17.1 and 1.18.1 wrong in 52, 2.0.0.dev in 0",
-       ("40 025", "40 019", "52 wrong", "0 in"), slow=True)
+@claim("Mathieu grid r ≤ 12, q = −400…400 step 0.5: 40 025 values, 40 025 GUARANTEED, 0 WIDE; scipy 1.17.1 and 1.18.1 wrong in 52, 2.0.0.dev in 0",
+       ("40 025 `GUARANTEED`", "0 `WIDE`", "52 wrong", "0 in"), slow=True)
 def _grid():
     if not _flint():
         return None
@@ -112,7 +112,7 @@ def _grid():
                 wrong += not (float(v.low) - tol <= s <= float(v.high) + tol)
     ver = tuple(int(x) for x in scipy.__version__.split(".")[:2])
     expected = 0 if ver >= (2, 0) else 52
-    return (total, wide, wrong) == (40025, 6, expected), f"{total} values, {wide} WIDE, scipy {scipy.__version__} wrong {wrong} (expected {expected})"
+    return (total, wide, wrong) == (40025, 0, expected), f"{total} values, {wide} WIDE, scipy {scipy.__version__} wrong {wrong} (expected {expected})"
 
 
 @claim("fluxonium Zhang 2021 (E_C 0.479, E_J 3.395, E_L 0.132, flux ½): f01 in [13.8815576, 13.8815586] MHz, N = 117",
@@ -200,26 +200,44 @@ def _timing():
     for _ in range(50):
         mathieu_a(5, 100.0)
     t2 = (time.perf_counter() - t) / 50
-    return True, f"[INFO] transmon {t1 * 1e3:.0f} ms, Mathieu {t2 * 1e3:.2f} ms (README: 92 ms, 0.33 ms on the author's machine)"
+    return True, f"[INFO] transmon {t1 * 1e3:.0f} ms, Mathieu {t2 * 1e3:.2f} ms (README: 92 ms, 0.43 ms on the author's machine)"
+
+
+def determinism_parts() -> List[Tuple[str, List[str]]]:
+    """The exact decimal strings of a fixed set of enclosures, one entry per guaranteed module: transmon, sphere,
+    Mathieu, fluxonium, parameter box, matrix element ⟨0|n|1⟩, then (added in 0.3.0 with the deterministic estimates)
+    a rotor with cos φ and cos 2φ (band path), its ⟨0|cos φ|1⟩, and an RbCs hyperfine sector."""
+    from qraft_ra import (Fluxonium, Rotor, RotorBall, SigmaMolecule, SphericalRotor, guaranteed_fluxonium_levels,
+                          guaranteed_levels, guaranteed_levels_over_box, guaranteed_matrix_element,
+                          guaranteed_molecule_levels, guaranteed_sphere_levels, mathieu_a, zeeman_hz)
+    out: List[Tuple[str, List[str]]] = []
+    out.append(("transmon", [s for pair in guaranteed_levels(Rotor.transmon(0.3, 15.0, n_g=0.25), 6).strings for s in pair]))
+    out.append(("sphere", [s for pair in guaranteed_sphere_levels(SphericalRotor(B=490.173994, dE=0.74, M=0), 3).strings
+                           for s in pair]))
+    v = mathieu_a(5, 100.0)
+    out.append(("mathieu", [str(v.low), str(v.high)]))
+    iv = guaranteed_fluxonium_levels(Fluxonium(E_C=0.567, E_J=2.052, E_L=0.835, flux=0.5), 3, 1e-9)
+    out.append(("fluxonium", [str(x) for x in iv.low + iv.high]))
+    b = guaranteed_levels_over_box(RotorBall.transmon((0.297, 0.303), (14.85, 15.15), n_g=0.25), 3)
+    out.append(("box", [str(x) for x in b.low + b.high]))
+    e = guaranteed_matrix_element(Rotor.transmon(0.3, 15.0, n_g=0.25), 0, 1, "n")
+    out.append(("matrix element n", [str(e.low), str(e.high)]))
+    r2 = Rotor(0.3, {1: -15.0, 2: 0.9}, n_g=0.25)
+    out.append(("rotor cos 2phi", [s for pair in guaranteed_levels(r2, 4).strings for s in pair]))
+    e2 = guaranteed_matrix_element(r2, 0, 1, "cos", 1)
+    out.append(("matrix element cos", [str(e2.low), str(e2.high)]))
+    m = SigmaMolecule(3, 7, B=490173994.0, D=213.0, c1=29.4, c2=196.8, c3=192.4, c4=19019.0, eQq1=-809290.0,
+                      eQq2=59980.0, z_N=zeeman_hz(0.0062, 181.541), z1=zeeman_hz(1.8295, 181.541),
+                      z2=zeeman_hz(0.7331, 181.541))
+    h = guaranteed_molecule_levels(m, 12, 1, 1e-11, L_initial=3, L_limit=3)
+    out.append(("hyperfine", [str(x) for x in h.low + h.high]))
+    return out
 
 
 def determinism_hash() -> str:
-    """sha256 of the exact decimal strings of a fixed set of enclosures (transmon, sphere, Mathieu, fluxonium, box,
-    matrix element): identical across runs iff the computations are deterministic."""
-    from qraft_ra import (Fluxonium, Rotor, RotorBall, SphericalRotor, guaranteed_fluxonium_levels, guaranteed_levels,
-                          guaranteed_levels_over_box, guaranteed_matrix_element, guaranteed_sphere_levels, mathieu_a)
-    parts = []
-    parts += [s for pair in guaranteed_levels(Rotor.transmon(0.3, 15.0, n_g=0.25), 6).strings for s in pair]
-    parts += [s for pair in guaranteed_sphere_levels(SphericalRotor(B=490.173994, dE=0.74, M=0), 3).strings for s in pair]
-    v = mathieu_a(5, 100.0)
-    parts += [str(v.low), str(v.high)]
-    iv = guaranteed_fluxonium_levels(Fluxonium(E_C=0.567, E_J=2.052, E_L=0.835, flux=0.5), 3, 1e-9)
-    parts += [str(x) for x in iv.low + iv.high]
-    b = guaranteed_levels_over_box(RotorBall.transmon((0.297, 0.303), (14.85, 15.15), n_g=0.25), 3)
-    parts += [str(x) for x in b.low + b.high]
-    e = guaranteed_matrix_element(Rotor.transmon(0.3, 15.0, n_g=0.25), 0, 1, "n")
-    parts += [str(e.low), str(e.high)]
-    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
+    """sha256 of the exact decimal strings of determinism_parts(), one per line, in order: identical on two machines
+    iff every listed enclosure is identical bit for bit."""
+    return hashlib.sha256("\n".join(s for _, ss in determinism_parts() for s in ss).encode()).hexdigest()
 
 
 def readme_check() -> List[str]:
