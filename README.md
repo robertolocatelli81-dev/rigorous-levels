@@ -291,10 +291,10 @@ package, not the source tree). The sandbox tests run once per isolation engine w
 in a fresh interpreter and checks what it prints. `bench/matrix.sh VENV...` reproduces the CI matrix locally (stack
 default / unlimited / 1 MiB, engines present, bwrap absent, bwrap failing; fresh HOME per run).
 
-Measured on 2026-11-12 (01:33 CET) on this tree with `bench/matrix.sh` on the four venvs, each run against the
+Measured on 2026-11-12 (03:01 CET) on this tree with `bench/matrix.sh` on the four venvs, each run against the
 package installed from the tree in a fresh temporary HOME, bwrap 0.8.0, podman 4.3.1 with the image
 `python:<minor>-slim` in the local store, wasmtime 50.0.1 (listed in `QRAFT_TRUSTED_ENGINES`) + CPython 3.15.2 WASI:
-20 of 20 runs OK, 334 tests each.
+20 of 20 runs OK, 340 tests each.
 
 | Python | numpy, scipy, python-flint | scqubits | stack default / unlimited / 1 MiB | bwrap hidden from PATH | fake bwrap (not root-owned) |
 |---|---|---|---|---|---|
