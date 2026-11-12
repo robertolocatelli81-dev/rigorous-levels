@@ -143,7 +143,9 @@ def _peak_rss_bytes():
         c.cb = ctypes.sizeof(c)
         k32 = ctypes.WinDLL("kernel32")
         k32.GetCurrentProcess.restype = wintypes.HANDLE
-        if not ctypes.WinDLL("psapi").GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(c), c.cb):
+        gpmi = ctypes.WinDLL("psapi").GetProcessMemoryInfo
+        gpmi.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC), wintypes.DWORD]
+        if not gpmi(k32.GetCurrentProcess(), ctypes.byref(c), c.cb):
             raise OSError("GetProcessMemoryInfo failed")
         return c.PeakWorkingSetSize
     import resource

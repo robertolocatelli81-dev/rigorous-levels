@@ -178,6 +178,7 @@ jobs:
       - name: What an AppContainer process can open (NUL device) and where its own folder is (measured, not assumed)
         shell: bash
         run: |
+          python -m pip install -r requirements/ci.txt
           python -m pip install --no-deps .
           python - <<'PY'
           import os, subprocess, sys, tempfile
@@ -194,9 +195,15 @@ jobs:
                       "    except OSError as e:\n        r.append(f'{m} {type(e).__name__} {e.errno}')\nopen(sys.argv[1], 'w').write('; '.join(r))\n")
           env = {**I._appcontainer_base_env(d), "TEMP": d, "TMP": d}
           cmd = subprocess.list2cmdline([sys.executable, "-I", "-S", "-B", probe, out])
-          print("exit:", I._run_appcontainer_process(ctypes, wt, sid, cmd, env, d, 60, 1024, os.path.join(d, "e.txt")))
-          print("open('nul') inside the AppContainer:", open(out).read() if os.path.exists(out) else open(os.path.join(d, "e.txt")).read())
-          print("AppContainer folder:", I._appcontainer_folder(ctypes, wt, s))
+          try:
+              print("exit:", I._run_appcontainer_process(ctypes, wt, sid, cmd, env, d, 60, 1024, os.path.join(d, "e.txt")))
+              print("open('nul') inside the AppContainer:", open(out).read() if os.path.exists(out) else open(os.path.join(d, "e.txt")).read())
+          except Exception as e:
+              print("NUL measure failed:", type(e).__name__, e)
+          try:
+              print("AppContainer folder:", I._appcontainer_folder(ctypes, wt, s))
+          except Exception as e:
+              print("AppContainer folder not found:", type(e).__name__, e)
           PY
       - name: Install and test (the appcontainer S1 test must run)
         shell: bash
