@@ -209,10 +209,18 @@ green; 5 red. Product defects, each with a test that fails on the tree before it
   reparse point) is now refused from `lstat`, and the opened file must be the one `lstat` saw.
 - docker: the runner's RLIMIT_NPROC of 16 counted every process of the host user (rootful docker, host user
   namespace): "can't start new thread" in the scqubits port on Linux 3.10. docker now caps the container with
-  `--pids-limit 64` and the runner leaves RLIMIT_NPROC to podman and bwrap.
+  `--pids-limit 16` (the same cap of 16, now counted only inside the container) and the runner leaves RLIMIT_NPROC
+  to podman and bwrap.
 - Deadlines and elapsed times use `time.perf_counter()`: on Windows with Python 3.12 a deadline of 1e-9 s did not
   raise DeadlineExceeded in `mathieu_a` and `guaranteed_sphere_levels` with the clocks used before (`time.time`,
   `time.monotonic`), whose resolution there is coarse; Windows with Python 3.14 passed.
+
+- macOS (python.org framework build, macOS 26): the interpreter in bin/ is a stub that starts
+  `Resources/Python.app/Contents/MacOS/Python` with posix_spawn, which the Seatbelt profile did not allow: the
+  sandbox-exec probe failed. That binary is now allowed too (only when it exists next to the interpreter).
+- Windows: CreateProcessW in the AppContainer failed with error 203 (ERROR_ENVVAR_NOT_FOUND) on the GitHub runner;
+  the environment block is now sorted by name as the documentation asks, and the error names the variables passed
+  (names only). Not yet confirmed by a CI run when this entry was written.
 
 Test and CI fixes: tests that need `pwd`, a `sh` fake interpreter or `SIGALRM` are POSIX-only or use a thread with a
 time limit; the examples get a fresh `USERPROFILE` on Windows (qutip needs a home); scqubits 4.3.1 is not installed

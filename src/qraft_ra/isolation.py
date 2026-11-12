@@ -49,7 +49,7 @@ CLIENT_ENV = ("PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "XDG_RUNTIME_DIR", "X
               "SYSTEMROOT", "SYSTEMDRIVE", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "PROGRAMDATA", "COMSPEC")
 SANDBOX_ENV = {"HOME": "/tmp/nohome", "PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1",
                "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"}
-CONTAINER_PIDS = 64   # docker --pids-limit (processes and threads of the container)
+CONTAINER_PIDS = 16   # docker --pids-limit (processes and threads of the container): the same cap as RLIMIT_NPROC
 _PROBES: Dict[Tuple[str, str], Dict[str, object]] = {}
 
 
@@ -362,6 +362,18 @@ def _sb_literal(p: str) -> str:
     return '"' + p.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _macos_exec_targets(python: str) -> List[str]:
+    """The interpreter and, for a framework build (python.org, CI runners), the real binary its bin/ stub starts with
+    posix_spawn: <prefix>/Resources/Python.app/Contents/MacOS/Python (CI 2026-11-12, macOS 26: the probe failed with
+    "posix_spawn: .../Python.app/Contents/MacOS/Python" when only the stub could be executed)."""
+    real = os.path.realpath(python)
+    out = [real]
+    app = os.path.join(os.path.dirname(os.path.dirname(real)), "Resources", "Python.app", "Contents", "MacOS", "Python")
+    if os.path.isfile(app):
+        out.append(os.path.realpath(app))
+    return out
+
+
 def seatbelt_profile(python: str, readable: List[str], out_path: str, scratch: str) -> str:
     """Deny-default Seatbelt profile: read everything except the user's homes (then the declared pieces inside
     them), write only the output file and a scratch folder, no network, fork/exec of the interpreter only."""
@@ -369,7 +381,7 @@ def seatbelt_profile(python: str, readable: List[str], out_path: str, scratch: s
              "(allow process-fork)", "(allow signal (target self))",
              "(allow mach-lookup (global-name \"com.apple.system.opendirectoryd.libinfo\") "
              "(global-name \"com.apple.system.logger\") (global-name \"com.apple.system.notification_center\"))",
-             f"(allow process-exec (literal {_sb_literal(os.path.realpath(python))}))",
+             *[f"(allow process-exec (literal {_sb_literal(x)}))" for x in _macos_exec_targets(python)],
              "(allow file-write-data (literal \"/dev/null\") (literal \"/dev/zero\"))"]
     for home in _user_homes():
         lines.append(f"(deny file-read* (subpath {_sb_literal(home)}))")
@@ -535,7 +547,8 @@ def _run_appcontainer_process(ctypes, wintypes, sid, cmdline: str, env: Dict[str
     si.StartupInfo.hStdInput, si.StartupInfo.hStdOutput, si.StartupInfo.hStdError = hnul, hnul, herr
     si.lpAttributeList = ctypes.cast(attr, ctypes.c_void_p)
     pi = PROCESS_INFORMATION()
-    envblock = "".join(f"{k}={v}\0" for k, v in env.items()) + "\0"
+    # sorted by name, case-insensitive, as the CreateProcess documentation asks of an environment block
+    envblock = "".join(f"{k}={env[k]}\0" for k in sorted(env, key=str.upper)) + "\0"
     EXTENDED_STARTUPINFO_PRESENT, CREATE_SUSPENDED, CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT = 0x80000, 0x4, 0x8000000, 0x400
     ok = k32.CreateProcessW(None, ctypes.create_unicode_buffer(cmdline), None, None, True,
                             EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
@@ -543,7 +556,9 @@ def _run_appcontainer_process(ctypes, wintypes, sid, cmdline: str, env: Dict[str
     k32.CloseHandle(herr)
     k32.CloseHandle(hnul)
     if not ok:
-        raise SandboxMissing(f"appcontainer: CreateProcessW failed ({ctypes.get_last_error()})")
+        err = ctypes.get_last_error()
+        raise SandboxMissing(f"appcontainer: CreateProcessW failed ({err}; command line {len(cmdline)} chars, environment "
+                             f"{sorted(env)}, working folder {cwd!r})")
     job = k32.CreateJobObjectW(None, None)
     info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
     JOB_TIME, ACTIVE_PROCESS, PROCESS_MEMORY, DIE_ON_EXC, KILL_ON_CLOSE = 0x4, 0x8, 0x100, 0x400, 0x2000

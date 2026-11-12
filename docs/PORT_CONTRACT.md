@@ -106,7 +106,7 @@ that fails or disagrees = `SandboxMissing`. Timeout: podman `--timeout` plus a h
 (docker: host-side kill only). NOT relied upon: `--memory`, `--cpus` (ignored with a warning on cgroups v1 rootless
 podman, measured 2026-11-11 on podman 4.3.1): memory and CPU time are limited by the runner's rlimits inside the
 container, as with bwrap. Processes: podman (its own user namespace) uses the runner's RLIMIT_NPROC of 16; docker
-passes `--pids-limit 64` and `QRAFT_NPROC=cgroup`, and the runner does not set RLIMIT_NPROC there, because rootful
+passes `--pids-limit 16` and `QRAFT_NPROC=cgroup`, and the runner does not set RLIMIT_NPROC there, because rootful
 docker runs the port with the host uid in the host user namespace, where RLIMIT_NPROC counts every process and thread
 of that user on the host (first CI run, 2026-11-12: "can't start new thread" on a GitHub Linux runner).
 

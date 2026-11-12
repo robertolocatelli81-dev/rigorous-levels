@@ -524,9 +524,29 @@ class TestCI20261112Platforms(unittest.TestCase):
         cmd = isolation._container_cmd("docker", "docker", "img", "n", 30, [], "/w", "/w/o.json")
         self.assertIn("--pids-limit", cmd)
         self.assertEqual(cmd[cmd.index("--pids-limit") + 1], str(isolation.CONTAINER_PIDS))
+        self.assertEqual(isolation.CONTAINER_PIDS, 16)                                # the S7 cap of every engine
         self.assertIn("QRAFT_NPROC=cgroup", cmd)
         cmd = isolation._container_cmd("podman", "podman", "img", "n", 30, [], "/w", "/w/o.json")
         self.assertNotIn("QRAFT_NPROC=cgroup", cmd)                                   # podman: own user namespace
+
+    @unittest.skipUnless(os.name == "posix", "a fake framework layout with POSIX paths")
+    def test_macos_framework_binary_allowed_by_the_profile(self):
+        from qraft_ra import isolation
+        d = os.path.realpath(tempfile.mkdtemp(prefix="framework_"))
+        try:
+            os.makedirs(os.path.join(d, "bin"))
+            app = os.path.join(d, "Resources", "Python.app", "Contents", "MacOS")
+            os.makedirs(app)
+            stub = os.path.join(d, "bin", "python3.12")
+            for f in (stub, os.path.join(app, "Python")):
+                open(f, "w").close()
+            self.assertEqual(isolation._macos_exec_targets(stub), [stub, os.path.join(app, "Python")])
+            prof = isolation.seatbelt_profile(stub, [], "/tmp/x/o.json", "/tmp/x")
+            self.assertIn(f'(allow process-exec (literal "{os.path.join(app, "Python")}"))', prof)
+            os.remove(os.path.join(app, "Python"))                                     # no framework: stub only
+            self.assertEqual(isolation._macos_exec_targets(stub), [stub])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
 
     @unittest.skipUnless(os.name == "posix", "resource limits: POSIX")
     def test_runner_skips_rlimit_nproc_only_when_told(self):
