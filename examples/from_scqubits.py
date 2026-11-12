@@ -4,7 +4,7 @@
 own levels at its own cutoff, in one line. Needs: pip install ".[scqubits]"."""
 import scqubits as sq
 
-from qraft_ra import guaranteed_from_scqubits
+from rigorous_levels import guaranteed_from_scqubits
 
 sq.settings.PROGRESSBAR_DISABLED = True
 

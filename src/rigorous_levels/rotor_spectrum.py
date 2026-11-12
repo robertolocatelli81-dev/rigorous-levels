@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra.rotor_spectrum — spectrum of the rotor on S¹ with a declared error.
+"""rigorous_levels.rotor_spectrum — spectrum of the rotor on S¹ with a declared error.
 
     H = 4 E_C (n − n_g)² + Σ_m [ c_m cos(mφ) + s_m sin(mφ) ]
 
@@ -14,7 +14,7 @@ What it adds to `eigh` on a fixed basis:
   - closed inputs: unknown key, NaN, inf, non-integer harmonic = refusal with a reason.
 
 Standard quantum mechanics (Koch et al. 2007 and later). State OK means "the number is the one of this H", not
-"this H describes the chip". QRAFT-RA is an internal model, not an external validator.
+"this H describes the chip". This package is not an external validator.
 Names: this module was `rotore_spettro` in 0.2.0 (deprecated aliases in that module).
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ from typing import Mapping, Optional, Tuple
 import numpy as np
 from scipy.linalg import eig_banded, eigh
 
-from qraft_ra._compat import add_field_aliases, deprecated_function
+from rigorous_levels._compat import add_field_aliases, deprecated_function
 
 OK = "OK"
 NOT_CONVERGED = "NOT_CONVERGED"          # 0.2.0: NON_CONVERGENTE

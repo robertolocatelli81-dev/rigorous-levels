@@ -13,7 +13,7 @@ import time
 
 import numpy as np
 
-from qraft_ra import Rotor, guaranteed_levels
+from rigorous_levels import Rotor, guaranteed_levels
 
 DEVICES = {
     "Q0": (16.685, 0.190, 4), "Q1": (21.194, 0.152, 5), "Q2": (21.960, 0.152, 5), "Q3": (25.636, 0.126, 7),

@@ -17,7 +17,7 @@ import time
 
 import numpy as np
 
-from qraft_ra import (Fluxonium, Rotor, RotorBall, SigmaMolecule, SphericalRotor, guaranteed_fluxonium_levels,
+from rigorous_levels import (Fluxonium, Rotor, RotorBall, SigmaMolecule, SphericalRotor, guaranteed_fluxonium_levels,
                       guaranteed_levels, guaranteed_levels_over_box, guaranteed_molecule_levels,
                       guaranteed_sphere_levels, mathieu_a, spectrum)
 

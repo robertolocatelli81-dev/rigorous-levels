@@ -3,7 +3,7 @@
 """Guaranteed matrix elements against scqubits (README "Measurements"): 200 transmons of the device regime (same
 generator and seed as bench/readme_numbers.py), ⟨0|n|1⟩, ⟨1|n|2⟩, ⟨0|n|2⟩, ⟨0|cos φ|1⟩, ⟨1|cos φ|2⟩.
 
-    python bench/matrix_elements.py OUT.json        # needs qraft_ra[scqubits]
+    python bench/matrix_elements.py OUT.json        # needs rigorous_levels[scqubits]
 
 For each element: the guaranteed enclosure and its width; whether |scqubits (ncut 40)| falls inside it (sign
 convention of the eigenvectors is arbitrary on both sides: the absolute value is compared); the sin-θ bounds."""
@@ -15,8 +15,8 @@ import time
 import numpy as np
 import scqubits as sq
 
-from qraft_ra import Rotor
-from qraft_ra.matrix_elements import OutOfDomain, guaranteed_matrix_element
+from rigorous_levels import Rotor
+from rigorous_levels.matrix_elements import OutOfDomain, guaranteed_matrix_element
 
 sq.settings.PROGRESSBAR_DISABLED = True
 ELEMENTS = ((0, 1, "n"), (1, 2, "n"), (0, 2, "n"), (0, 1, "cos"), (1, 2, "cos"))

@@ -12,8 +12,8 @@ import json
 import sys
 import time
 
-from qraft_ra import SigmaMolecule, guaranteed_molecule_levels, zeeman_hz
-from qraft_ra.hyperfine_molecule import transition
+from rigorous_levels import SigmaMolecule, guaranteed_molecule_levels, zeeman_hz
+from rigorous_levels.hyperfine_molecule import transition
 
 TAB = [(5, 181.507, 980231.07, 980233.0, 2.0), (5, 204.436, 980235.14, 980237.0, 1.0),
        (4, 181.484, 980277.96, 980278.9, 0.2), (4, 204.397, 980292.08, 980291.0, 0.2),

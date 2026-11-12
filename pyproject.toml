@@ -3,7 +3,7 @@ requires = ["setuptools>=77.0.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "qraft-ra"
+name = "rigorous-levels"
 dynamic = ["version"]
 description = "Guaranteed eigenvalue intervals for the charge-basis rotor (transmon, cos mφ), the spherical rotor and the 1Σ molecule (hyperfine, Zeeman, Stark), a convergence warning for scqubits, a sandboxed multiport for external solvers, and the guaranteed error of the Duffing model"
 readme = "README.md"
@@ -20,10 +20,10 @@ test = ["mpmath>=1.3.0"]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-packages = ["qraft_ra"]
+packages = ["rigorous_levels"]
 
 [tool.setuptools.dynamic]
-version = { attr = "qraft_ra.__version__" }
+version = { attr = "rigorous_levels.__version__" }
 
 [tool.ruff]
 target-version = "py310"

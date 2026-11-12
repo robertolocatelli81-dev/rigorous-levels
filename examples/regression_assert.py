@@ -12,7 +12,7 @@ import scipy
 import scipy.sparse as sp
 from scipy.sparse.linalg import eigsh
 
-from qraft_ra import Rotor, assert_inside, guaranteed_levels
+from rigorous_levels import Rotor, assert_inside, guaranteed_levels
 
 r = Rotor(0.3, {})                                   # H = 4 E_C n², exact spectrum 0, 1.2, 1.2, 4.8, ...
 iv = guaranteed_levels(r, 4, 1e-10)

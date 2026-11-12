@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/hyperfine_molecule.py — ¹Σ molecule (rotation + hyperfine + Zeeman + Stark) with levels as GUARANTEED
+"""rigorous_levels/hyperfine_molecule.py — ¹Σ molecule (rotation + hyperfine + Zeeman + Stark) with levels as GUARANTEED
 intervals [low, high] with respect to the truncation N ≤ L.
 
     H = B N² − D (N²)² + c₁ N·I₁ + c₂ N·I₂ + c₄ I₁·I₂ − √6 c₃ T²(C)·T²(I₁,I₂) + ¼ Σ_i (eQq)_i T²(Q_i)·T²(∇E)
@@ -17,7 +17,7 @@ sign holds; the comparison with diatomic-py in the tests passes c₃ → −c₃
 The matrix elements are rebuilt in Arb balls from square roots of exact rationals (3j symbols from sympy) and
 compared with diatomic-py in the tests (a check of the construction, not of the proof).
 
-Guarantee (Teschl, Theorem 4.12(i) and Corollary 4.11; the argument of qraft_ra/guaranteed_intervals.py and of the
+Guarantee (Teschl, Theorem 4.12(i) and Corollary 4.11; the argument of rigorous_levels/guaranteed_intervals.py and of the
 sphere):
   A = compression of H to N ≤ L; V = coupling of A with N ∈ {L+1, L+2} (only the Stark term, ΔN = 1, and the rank-2
   terms, ΔN = 2, leave A); C = block N ≥ L+1.
@@ -37,7 +37,7 @@ reviewer (the mutant with the wrong sign of η gives 50); RbCs with the constant
 their 16 hyperfine transitions within 100 Hz with intervals 7 mHz wide.
 
 What it does NOT say: that H describes the molecule (missing terms: AC polarizability, non-parallel fields).
-QRAFT-RA is an internal model, not an external validator.
+This package is not an external validator.
 Names: this module was `molecola_iperfine_garantita` in 0.2.0 (deprecated aliases in that module).
 """
 from __future__ import annotations
@@ -51,9 +51,9 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from qraft_ra._compat import add_field_aliases
-from qraft_ra._deterministic import dense_lowest
-from qraft_ra.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint
+from rigorous_levels._compat import add_field_aliases
+from rigorous_levels._deterministic import dense_lowest
+from rigorous_levels.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint
 
 __all__ = ["SigmaMolecule", "guaranteed_molecule_levels", "transition", "sector_dimension", "zeeman_hz",
            "OutOfDomain", "ArbMissing", "DeadlineExceeded"]

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""Tests of qraft_ra/mathieu.py (PREREG D1 of 0.3.0, 2026-11-11): exact controls at q = 0, DLMF symmetries, internal
+"""Tests of rigorous_levels/mathieu.py (PREREG D1 of 0.3.0, 2026-11-11): exact controls at q = 0, DLMF symmetries, internal
 consistency with the charge-basis rotor (a different code path), a narrowed-interval negative control, closed inputs,
 and the known value a_0(1) (Abramowitz & Stegun Table 20.1: −0.45513860)."""
 import importlib.util
@@ -9,9 +9,9 @@ from fractions import Fraction
 
 FLINT = importlib.util.find_spec("flint") is not None
 if FLINT:
-    from qraft_ra import mathieu as M  # noqa: E402
-    from qraft_ra.guaranteed_intervals import guaranteed_levels  # noqa: E402
-    from qraft_ra.rotor_spectrum import Rotor  # noqa: E402
+    from rigorous_levels import mathieu as M  # noqa: E402
+    from rigorous_levels.guaranteed_intervals import guaranteed_levels  # noqa: E402
+    from rigorous_levels.rotor_spectrum import Rotor  # noqa: E402
 
 
 def overlap(lo1, hi1, lo2, hi2):
@@ -175,7 +175,7 @@ class TestNemesis030ExtremeInputs(unittest.TestCase):
         self.assertEqual(M.mathieu_a(1, 1e8).state, "GUARANTEED")                                  # positive control
 
     def test_assert_inside_unit_not_a_string_refused(self):
-        from qraft_ra.scqubits_adapter import assert_inside
+        from rigorous_levels.scqubits_adapter import assert_inside
         iv = guaranteed_levels(Rotor.transmon(0.3, 15.0, n_g=0.25), 2)
         lev = [float(iv.low[0]), float(iv.low[1])]
         for u in ([1], {}, 1, None):          # [1] and {} raised TypeError (unhashable) before the delta review

@@ -8,8 +8,8 @@ import unittest
 
 FLINT = importlib.util.find_spec("flint") is not None
 if FLINT:
-    from qraft_ra import hyperfine_molecule as MI  # noqa: E402
-    from qraft_ra import spherical_rotor as RS  # noqa: E402
+    from rigorous_levels import hyperfine_molecule as MI  # noqa: E402
+    from rigorous_levels import spherical_rotor as RS  # noqa: E402
 
 
 @unittest.skipUnless(FLINT, "python-flint assente")

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""Test di qraft_ra/multiport.py + qraft_ra/port_runner.py (10/11/2026). Specifica: note dell'autore (non pubblicate).
+"""Test di rigorous_levels/multiport.py + rigorous_levels/port_runner.py (10/11/2026). Specifica: note dell'autore (non pubblicate).
 Controlli positivi S1-S7 della specifica: ognuno deve POTER fallire (il runner fuori sandbox fa ciò che dentro è bloccato)."""
 import importlib.util
 import json
@@ -13,7 +13,7 @@ import tempfile
 import unittest
 
 
-from qraft_ra import multiport as MP  # noqa: E402
+from rigorous_levels import multiport as MP  # noqa: E402
 
 FLINT = importlib.util.find_spec("flint") is not None
 
@@ -21,8 +21,8 @@ FLINT = importlib.util.find_spec("flint") is not None
 def _engines_available():
     """The engines whose fail-closed probe passes on this machine: the sandbox tests run once per engine and are
     SKIPPED with the probe's reason otherwise (bwrap needs user namespaces; containers need the local image;
-    sandbox-exec needs macOS; appcontainer needs Windows; wasm needs wasmtime + QRAFT_PYTHON_WASM)."""
-    from qraft_ra import isolation
+    sandbox-exec needs macOS; appcontainer needs Windows; wasm needs wasmtime + RIGOROUS_LEVELS_PYTHON_WASM)."""
+    from rigorous_levels import isolation
     ok, why = [], {}
     for e in isolation.ENGINE_ORDER:
         try:
@@ -40,7 +40,7 @@ import sysconfig  # noqa: E402
 
 import site  # noqa: E402
 
-# il venv qraft prende matplotlib (richiesto da scqubits) dal site user: entrambi dichiarati, in sola lettura
+# il venv di prova prende matplotlib (richiesto da scqubits) dal site user: entrambi dichiarati, in sola lettura
 SITE = tuple(p for p in (sysconfig.get_path("purelib"), site.getusersitepackages()) if os.path.isdir(p))
 ROTOR = {"type": "cos_rotor", "E_C": 0.3, "E_J": 15.0, "n_g": 0.25}
 
@@ -60,13 +60,13 @@ WINDOWS_SYSTEM_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT
 
 def runner_direct(r, timeout=30):
     """Esegue il runner SENZA sandbox (solo nei test, come check positivo): ciò che qui riesce, dentro deve fallire.
-    QRAFT_HOST_LIMITS=memory: fuori dalla sandbox nessuno impone la memoria, e macOS rifiuta RLIMIT_AS."""
-    work = tempfile.mkdtemp(prefix="qraft_port_direct_")
+    RIGOROUS_LEVELS_HOST_LIMITS=memory: fuori dalla sandbox nessuno impone la memoria, e macOS rifiuta RLIMIT_AS."""
+    work = tempfile.mkdtemp(prefix="rigorous_levels_port_direct_")
     try:
         with open(os.path.join(work, "request.json"), "w") as f:
             json.dump(r.json(), f)
         env = {"PATH": os.environ.get("PATH", ""), "HOME": tempfile.mkdtemp(prefix="home_prova_"),
-               "QRAFT_HOST_LIMITS": "memory"}
+               "RIGOROUS_LEVELS_HOST_LIMITS": "memory"}
         if os.name == "nt":
             env.update({k: os.environ[k] for k in WINDOWS_SYSTEM_ENV if k in os.environ})
         subprocess.run([sys.executable, "-I", "-B", str(MP.RUNNER), work], capture_output=True, text=True, timeout=timeout,
@@ -171,7 +171,7 @@ class _SandboxTests:
     def test_s5_engine_missing_fail_closed(self):
         """S5: the engine missing → SandboxMissing, nothing runs (no fallback). Missing = its executable not on PATH;
         appcontainer has no executable: missing = the Windows API unavailable (_win refuses)."""
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         original, probes, win = isolation.shutil.which, dict(isolation._PROBES), isolation._win
         isolation.shutil.which = lambda name: None
         isolation._win = _win_missing
@@ -185,7 +185,7 @@ class _SandboxTests:
 
     def test_s5_probe_that_does_not_isolate_fail_closed(self):
         """S5: a probe that reports an open network / writable root / visible home → SandboxMissing."""
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         probes = dict(isolation._PROBES)
         isolation._PROBES.clear()
         name = {"podman": "_probe_container", "docker": "_probe_container", "bwrap": "_probe_bwrap",
@@ -254,8 +254,8 @@ class _SandboxTests:
     def test_s7_solutore_giusto_e_sbagliato(self):
         if not FLINT:
             self.skipTest("python-flint assente")
-        from qraft_ra.guaranteed_intervals import guaranteed_levels
-        from qraft_ra.rotor_spectrum import Rotor
+        from rigorous_levels.guaranteed_intervals import guaranteed_levels
+        from rigorous_levels.rotor_spectrum import Rotor
         iv = guaranteed_levels(Rotor(E_C=0.3, cosines=((1, -15.0),), n_g=0.25), 6, deadline=60)
         u = self.run_port(request("python_rotor" if self.ENGINE not in NUMPY_ENGINES else "numpy_rotor"))
         self.assertEqual(u.state, "OK", u)
@@ -290,7 +290,7 @@ class _SandboxTests:
         self.assertNotIn("REACHED", u.solver_version)
 
     def test_s2_scrittura_e_home_bloccate(self):
-        fuori = tempfile.mkdtemp(prefix="qraft_fuori_")
+        fuori = tempfile.mkdtemp(prefix="rigorous_levels_fuori_")
         target = os.path.join(fuori, "scritto_dal_solutore.txt")
         real_home = os.path.expanduser("~")
         r = request("test_write", truncation={"path": target, "real_home": real_home})
@@ -303,7 +303,7 @@ class _SandboxTests:
         self.assertIn(f"blocked {target}", u.reason)
         self.assertIn("real_home_visible=False", u.reason)
         self.assertFalse(os.path.exists(target))
-        self.assertFalse(os.path.exists(os.path.join(real_home, "qraft_port_test.txt")))
+        self.assertFalse(os.path.exists(os.path.join(real_home, "rigorous_levels_port_test.txt")))
         shutil.rmtree(fuori, ignore_errors=True)
 
     def test_s3_tempo(self):
@@ -325,12 +325,12 @@ class _SandboxTests:
     def test_s4_ambiente_pulito(self):
         """PYTHONPATH/HOME della sessione non arrivano: la port vede HOME = /tmp/nohome (inesistente)."""
         r = request("test_write", truncation={"path": "/tmp/fuori_work.txt", "real_home": os.path.expanduser("~")})
-        os.environ["QRAFT_PROVA_AMBIENTE"] = "1"
+        os.environ["RIGOROUS_LEVELS_PROVA_AMBIENTE"] = "1"
         try:
             u = self.run_port(r)
         finally:
-            os.environ.pop("QRAFT_PROVA_AMBIENTE", None)
-        self.assertRegex(u.reason, r"blocked \S*nohome\S*qraft_port_test.txt")
+            os.environ.pop("RIGOROUS_LEVELS_PROVA_AMBIENTE", None)
+        self.assertRegex(u.reason, r"blocked \S*nohome\S*rigorous_levels_port_test.txt")
         if self.ENGINE in ("bwrap", "podman", "docker"):          # new PID namespace: the runner has a small pid
             pid = int(u.reason.split("pid=")[1].split(";")[0].strip())
             self.assertLessEqual(pid, 10, u.reason)
@@ -346,8 +346,8 @@ class _SandboxTests:
         self.skip_without_numpy()
         if importlib.util.find_spec("scqubits") is None or not FLINT:
             self.skipTest("scqubits o flint assenti")
-        from qraft_ra.guaranteed_intervals import guaranteed_levels
-        from qraft_ra.rotor_spectrum import Rotor
+        from rigorous_levels.guaranteed_intervals import guaranteed_levels
+        from rigorous_levels.rotor_spectrum import Rotor
         iv = guaranteed_levels(Rotor(E_C=0.3, cosines=((1, -15.0),), n_g=0.25), 6, deadline=60)
         u = self.run_port(request("scqubits_transmon", mem_mib=4096, seconds=120))
         self.assertEqual(u.state, "OK", u)
@@ -355,7 +355,7 @@ class _SandboxTests:
         self.assertIn(MP.compare(iv, "GHz", u, tolerance=1e-12).overall, ("INSIDE", "INSIDE_TOLERANCE"))
         if importlib.util.find_spec("diatomic") is None:
             self.skipTest("diatomic-py assente")
-        from qraft_ra import hyperfine_molecule as MI
+        from rigorous_levels import hyperfine_molecule as MI
         mol = dict(type="sigma_molecule", two_I1=3, two_I2=7, two_MF=12, B=490173.994e3, D=213.0, c1=29.4, c2=196.8,
                    c3=192.4, c4=19.019e3, eQq1=-809.29e3, eQq2=59.98e3, z_N=MI.zeeman_hz(0.0062, 181.541),
                    z1=MI.zeeman_hz(1.8295, 181.541), z2=MI.zeeman_hz(0.7331, 181.541), dE=0.0)
@@ -368,14 +368,14 @@ class _SandboxTests:
 
     def test_ambiente_di_sessione_mai_visibile(self):
         """Nemmeno in /proc/1/environ (init di bwrap). Controllo positivo: fuori dalla sandbox la variabile si vede."""
-        r = request("test_hostile", truncation={"mode": "environment", "name": "QRAFT_NEMESIS_ESCA"})
-        os.environ["QRAFT_NEMESIS_ESCA"] = "esca"
+        r = request("test_hostile", truncation={"mode": "environment", "name": "RIGOROUS_LEVELS_NEMESIS_ESCA"})
+        os.environ["RIGOROUS_LEVELS_NEMESIS_ESCA"] = "esca"
         try:
             u = self.run_port(r)
-            diretto = subprocess.run([sys.executable, "-c", "import os,sys; print('QRAFT_NEMESIS_ESCA' in os.environ)"],
+            diretto = subprocess.run([sys.executable, "-c", "import os,sys; print('RIGOROUS_LEVELS_NEMESIS_ESCA' in os.environ)"],
                                      capture_output=True, text=True).stdout.strip()
         finally:
-            os.environ.pop("QRAFT_NEMESIS_ESCA", None)
+            os.environ.pop("RIGOROUS_LEVELS_NEMESIS_ESCA", None)
         self.assertEqual(u.state, "ERROR", u)
         self.assertIn("seen in []", u.reason)
         self.assertEqual(diretto, "True")
@@ -411,7 +411,7 @@ class _SandboxTests:
     def test_site_packages_sola_lettura_e_rlimit(self):
         """Il site-packages montato non è scrivibile (il engine «process» importa da lì); NPROC, FSIZE e CPU mordono."""
         # name usa-e-getta, NON .pth, e rimosso comunque: un mutante che rende scrivibile il bind scriverebbe nel venv VERO
-        target = os.path.join(SITE[0], f"qraft_nemesis_prova_{os.getpid()}.txt")
+        target = os.path.join(SITE[0], f"rigorous_levels_nemesis_prova_{os.getpid()}.txt")
         try:
             u = self.run_port(request("test_hostile", truncation={"mode": "write", "path": target}))
             esiste = os.path.exists(target)
@@ -456,7 +456,7 @@ class TestNemesis20261111(unittest.TestCase):
     """Rilievi NEMESIS 11/11/2026: ogni caso ha il suo check positivo (fuori dalla sandbox / codice vecchio)."""
 
     def test_leggi_uscita_json_stretto(self):
-        d = tempfile.mkdtemp(prefix="qraft_uscita_")
+        d = tempfile.mkdtemp(prefix="rigorous_levels_uscita_")
         try:
             p = os.path.join(d, "u.json")
             buona = {"contract": MP.CONTRACT, "port": "numpy_rotor", "solver_version": "x", "levels": [0.0] * 6,
@@ -538,7 +538,7 @@ class TestNemesis20261111(unittest.TestCase):
         with open(finto, "w") as f:
             f.write("#!/bin/sh\nexit 0\n")
         os.chmod(finto, 0o755)
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         originale, probes = isolation.shutil.which, dict(isolation._PROBES)
         isolation.shutil.which = lambda name: finto
         isolation._PROBES.clear()
@@ -584,17 +584,17 @@ class TestCI20261112Platforms(unittest.TestCase):
     def test_docker_caps_processes_with_its_cgroup_not_rlimit_nproc(self):
         # rootful docker: --user is the host uid in the host user namespace, where RLIMIT_NPROC counts every process
         # of that user (CI linux 3.10: "can't start new thread")
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         cmd = isolation._container_cmd("docker", "docker", "img", "n", 30, [], "/w", "/w/o.json")
         self.assertIn("--pids-limit", cmd)
         self.assertEqual(cmd[cmd.index("--pids-limit") + 1], str(isolation.CONTAINER_PIDS))
         self.assertEqual(isolation.CONTAINER_PIDS, 16)                                # the S7 cap of every engine
-        self.assertIn("QRAFT_NPROC=cgroup", cmd)
+        self.assertIn("RIGOROUS_LEVELS_NPROC=cgroup", cmd)
         cmd = isolation._container_cmd("podman", "podman", "img", "n", 30, [], "/w", "/w/o.json")
-        self.assertNotIn("QRAFT_NPROC=cgroup", cmd)                                   # podman: own user namespace
+        self.assertNotIn("RIGOROUS_LEVELS_NPROC=cgroup", cmd)                                   # podman: own user namespace
 
     def test_appcontainer_environment_has_system_variables_and_no_real_user_folders(self):
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         s = tempfile.mkdtemp(prefix="ac_env_")
         try:
             env = isolation._appcontainer_base_env(s)
@@ -610,7 +610,7 @@ class TestCI20261112Platforms(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "a fake framework layout with POSIX paths")
     def test_macos_framework_binary_allowed_by_the_profile(self):
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         d = os.path.realpath(tempfile.mkdtemp(prefix="framework_"))
         try:
             os.makedirs(os.path.join(d, "bin"))
@@ -630,13 +630,13 @@ class TestCI20261112Platforms(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "resource limits: POSIX")
     def test_runner_skips_rlimit_nproc_only_when_told(self):
         from unittest import mock
-        from qraft_ra import port_runner as R
+        from rigorous_levels import port_runner as R
         if R.resource is None:
             self.skipTest("resource absent")
-        for env, attesa in (({"QRAFT_NPROC": "cgroup"}, False), ({}, True)):
+        for env, attesa in (({"RIGOROUS_LEVELS_NPROC": "cgroup"}, False), ({}, True)):
             with mock.patch.dict(os.environ, env, clear=False), mock.patch.object(R.resource, "setrlimit") as s:
                 if not env:
-                    os.environ.pop("QRAFT_NPROC", None)
+                    os.environ.pop("RIGOROUS_LEVELS_NPROC", None)
                 R._rlimit(10, 512)
                 chiamati = [c.args[0] for c in s.call_args_list]
                 self.assertEqual(R.resource.RLIMIT_NPROC in chiamati, attesa, env)
@@ -664,9 +664,9 @@ class TestCI20261112Watchdog(unittest.TestCase):
 
     def _rlimit(self, fake, env):
         from unittest import mock
-        from qraft_ra import port_runner as R
+        from rigorous_levels import port_runner as R
         with mock.patch.object(R, "resource", fake), mock.patch.dict(os.environ, env, clear=False):
-            for k in ("QRAFT_HOST_LIMITS", "QRAFT_NPROC"):
+            for k in ("RIGOROUS_LEVELS_HOST_LIMITS", "RIGOROUS_LEVELS_NPROC"):
                 if k not in env:
                     os.environ.pop(k, None)
             R._rlimit(10, 512)
@@ -677,13 +677,13 @@ class TestCI20261112Watchdog(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "RLIMIT_AS cannot be set here"):
             self._rlimit(f, {})
         f = F(refuse=(F.RLIMIT_AS,))
-        self._rlimit(f, {"QRAFT_HOST_LIMITS": "memory"})               # macOS + sandbox-exec: the host watches
+        self._rlimit(f, {"RIGOROUS_LEVELS_HOST_LIMITS": "memory"})               # macOS + sandbox-exec: the host watches
         self.assertEqual(f.set, {F.RLIMIT_CPU: (10, 10), F.RLIMIT_FSIZE: (64 << 20, 64 << 20), F.RLIMIT_NPROC: (16, 16)})
         f = F(refuse=(F.RLIMIT_CPU,))                                   # host enforcement is per limit, not for all
         with self.assertRaisesRegex(RuntimeError, "RLIMIT_CPU"):
-            self._rlimit(f, {"QRAFT_HOST_LIMITS": "memory"})
+            self._rlimit(f, {"RIGOROUS_LEVELS_HOST_LIMITS": "memory"})
         with self.assertRaisesRegex(RuntimeError, "unknown limit"):
-            self._rlimit(F(), {"QRAFT_HOST_LIMITS": "memory,everything"})
+            self._rlimit(F(), {"RIGOROUS_LEVELS_HOST_LIMITS": "memory,everything"})
 
     def test_rlimit_never_above_a_lower_hard_limit(self):
         F = self.FakeResource
@@ -693,7 +693,7 @@ class TestCI20261112Watchdog(unittest.TestCase):
 
     def _run_port_with(self, fake_run):
         from unittest import mock
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         with mock.patch.object(isolation, "probe", lambda *a, **k: {}), mock.patch.object(isolation, "run", fake_run):
             return MP.run_port(request("python_rotor"), engine="bwrap")
 
@@ -716,8 +716,8 @@ class TestCI20261112Watchdog(unittest.TestCase):
         self.assertIn("host watchdog", u.reason)
 
     def test_seatbelt_output_file_writable_data_only(self):
-        from qraft_ra import isolation
-        out, scratch = os.path.join(os.sep, "qraft_x", "o.json"), os.path.join(os.sep, "qraft_x", "s")
+        from rigorous_levels import isolation
+        out, scratch = os.path.join(os.sep, "rigorous_levels_x", "o.json"), os.path.join(os.sep, "rigorous_levels_x", "s")
         prof = isolation.seatbelt_profile(sys.executable, [], out, scratch)
         lit = isolation._sb_literal
         self.assertIn(f"(allow file-write-data (literal {lit(os.path.realpath(out))}))", prof)
@@ -725,18 +725,18 @@ class TestCI20261112Watchdog(unittest.TestCase):
         self.assertIn(f"(allow file-write* (subpath {lit(os.path.realpath(scratch))}))", prof)
 
     def test_cpu_reason_of_the_job(self):
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         self.assertEqual(isolation.cpu_reason(20_000_000, 2), "")                       # exactly at the cap
         self.assertEqual(isolation.cpu_reason(23_000_000, 2), "cpu: 2.3 s of CPU over the 2 s cap (host watchdog)")
 
     def test_appcontainer_output_grant_without_delete(self):
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         self.assertEqual(isolation.OUTPUT_GRANT, "(R,W)")                # M includes DELETE: output.json was removed
 
     def test_disk_reason_caps(self):
         from unittest import mock
-        from qraft_ra import isolation
-        d = tempfile.mkdtemp(prefix="qraft_disk_")
+        from rigorous_levels import isolation
+        d = tempfile.mkdtemp(prefix="rigorous_levels_disk_")
         try:
             with mock.patch.object(isolation, "FILE_CAP", 4 << 20), mock.patch.object(isolation, "TMPFS_BYTES", 8 << 20):
                 with open(os.path.join(d, "a"), "wb") as f:
@@ -756,8 +756,8 @@ class TestCI20261112Watchdog(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform.startswith("linux") or sys.platform == "darwin", "host watchdog: Linux/macOS")
     def test_run_watched_kills_over_memory_and_catches_a_short_peak(self):
-        from qraft_ra import isolation
-        d = tempfile.mkdtemp(prefix="qraft_watch_")
+        from rigorous_levels import isolation
+        d = tempfile.mkdtemp(prefix="rigorous_levels_watch_")
         try:
             err = os.path.join(d, "err.txt")
             hold = "a = bytearray(400 << 20); a[::4096] = b'1' * len(a[::4096]); import time; time.sleep(20)"
@@ -777,8 +777,8 @@ class TestCI20261112Watchdog(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "host watchdog: POSIX process groups")
     def test_run_watched_disk_and_no_child_left_behind(self):
         from unittest import mock
-        from qraft_ra import isolation
-        d = tempfile.mkdtemp(prefix="qraft_watch_")
+        from rigorous_levels import isolation
+        d = tempfile.mkdtemp(prefix="rigorous_levels_watch_")
         try:
             err = os.path.join(d, "err.txt")
             code = (f"import os, time\nif os.fork() == 0:\n    time.sleep(60); os._exit(0)\n"
@@ -795,7 +795,7 @@ class TestCI20261112Watchdog(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix" and hasattr(os, "geteuid") and os.geteuid() != 0, "chmod: POSIX non-root")
     def test_real_home_visible_means_listable(self):
-        d = tempfile.mkdtemp(prefix="qraft_home_")
+        d = tempfile.mkdtemp(prefix="rigorous_levels_home_")
         try:
             os.chmod(d, 0o311)                                               # exists (isdir True), not listable
             r = request("test_write", truncation={"path": os.path.join(d, "x", "y"), "real_home": d})
@@ -808,12 +808,12 @@ class TestCI20261112Watchdog(unittest.TestCase):
 
     def test_devnull_redirected_only_when_nul_cannot_be_opened(self):
         from unittest import mock
-        from qraft_ra import port_runner as R
-        d = tempfile.mkdtemp(prefix="qraft_nul_")
+        from rigorous_levels import port_runner as R
+        d = tempfile.mkdtemp(prefix="rigorous_levels_nul_")
         alt = os.path.join(d, "devnull")
         original = os.devnull
         try:
-            with mock.patch.dict(os.environ, {"QRAFT_DEVNULL": alt}):
+            with mock.patch.dict(os.environ, {"RIGOROUS_LEVELS_DEVNULL": alt}):
                 R._devnull()
                 self.assertEqual(os.devnull, original)                       # NUL opens: untouched
                 os.devnull = os.path.join(d, "no", "such")
@@ -840,7 +840,7 @@ class TestNemesis030EngineTrust(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix" and hasattr(os, "getuid") and os.getuid() != 0, "POSIX, non-root")
     def test_user_owned_engine_binaries_refused(self):
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         originale, probes = isolation.shutil.which, dict(isolation._PROBES)
         try:
             for engine, call in (("podman", lambda: isolation.probe("podman")),
@@ -865,56 +865,56 @@ class TestNemesis030EngineTrust(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix" and hasattr(os, "getuid") and os.getuid() != 0, "POSIX, non-root")
     def test_trusted_engines_opt_in_is_exact_and_explicit(self):
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         d, finto = self._fake("wasmtime")
         d, finto = os.path.realpath(d), os.path.realpath(finto)                   # macOS: /var -> /private/var
-        vecchio = os.environ.pop("QRAFT_TRUSTED_ENGINES", None)
+        vecchio = os.environ.pop("RIGOROUS_LEVELS_TRUSTED_ENGINES", None)
         try:
             with self.assertRaises(MP.SandboxMissing):                                   # not listed: refused
                 isolation._trusted_exe("wasmtime", finto)
-            os.environ["QRAFT_TRUSTED_ENGINES"] = os.path.join(d, "altro") + os.pathsep + d   # folder, not the file
+            os.environ["RIGOROUS_LEVELS_TRUSTED_ENGINES"] = os.path.join(d, "altro") + os.pathsep + d   # folder, not the file
             with self.assertRaises(MP.SandboxMissing):
                 isolation._trusted_exe("wasmtime", finto)
-            os.environ["QRAFT_TRUSTED_ENGINES"] = finto                                    # exact path: accepted
+            os.environ["RIGOROUS_LEVELS_TRUSTED_ENGINES"] = finto                                    # exact path: accepted
             self.assertEqual(isolation._trusted_exe("wasmtime", finto), finto)
             os.chmod(finto, 0o775)                                                         # group-writable: refused
             with self.assertRaises(MP.SandboxMissing) as cm:
                 isolation._trusted_exe("wasmtime", finto)
             self.assertIn("writable by group or others", str(cm.exception))
         finally:
-            os.environ.pop("QRAFT_TRUSTED_ENGINES", None)
+            os.environ.pop("RIGOROUS_LEVELS_TRUSTED_ENGINES", None)
             if vecchio is not None:
-                os.environ["QRAFT_TRUSTED_ENGINES"] = vecchio
+                os.environ["RIGOROUS_LEVELS_TRUSTED_ENGINES"] = vecchio
             shutil.rmtree(d, ignore_errors=True)
 
     @unittest.skipUnless(os.name == "posix" and hasattr(os, "getuid") and os.getuid() != 0, "POSIX, non-root")
     def test_trusted_engines_entry_must_be_the_exact_real_path(self):
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         d, finto = self._fake("wasmtime")
         d, finto = os.path.realpath(d), os.path.realpath(finto)
         link = os.path.join(d, "collegamento")
         os.symlink(finto, link)
-        vecchio, cwd = os.environ.pop("QRAFT_TRUSTED_ENGINES", None), os.getcwd()
+        vecchio, cwd = os.environ.pop("RIGOROUS_LEVELS_TRUSTED_ENGINES", None), os.getcwd()
         try:
             os.chdir(d)
             for voce in ("wasmtime", "./wasmtime", link, finto + "/", " " + finto, d + "/../" + os.path.basename(d) + "/wasmtime"):
-                os.environ["QRAFT_TRUSTED_ENGINES"] = voce
+                os.environ["RIGOROUS_LEVELS_TRUSTED_ENGINES"] = voce
                 with self.assertRaises(MP.SandboxMissing, msg=repr(voce)):
                     isolation._trusted_exe("wasmtime", finto)
-            os.environ["QRAFT_TRUSTED_ENGINES"] = finto
+            os.environ["RIGOROUS_LEVELS_TRUSTED_ENGINES"] = finto
             self.assertEqual(isolation._trusted_exe("wasmtime", link), finto)     # the real path is what runs
             self.assertEqual(isolation._VOUCHED.get("wasmtime"), finto)
         finally:
             os.chdir(cwd)
-            os.environ.pop("QRAFT_TRUSTED_ENGINES", None)
+            os.environ.pop("RIGOROUS_LEVELS_TRUSTED_ENGINES", None)
             isolation._VOUCHED.pop("wasmtime", None)
             if vecchio is not None:
-                os.environ["QRAFT_TRUSTED_ENGINES"] = vecchio
+                os.environ["RIGOROUS_LEVELS_TRUSTED_ENGINES"] = vecchio
             shutil.rmtree(d, ignore_errors=True)
 
     @unittest.skipUnless(os.name == "posix" and hasattr(os, "getuid") and os.getuid() != 0, "POSIX, non-root")
     def test_root_engine_runs_by_its_real_path_and_folder_must_be_root_owned(self):
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         sh = os.path.realpath("/bin/sh")
         if os.stat(sh).st_uid != 0:
             self.skipTest("/bin/sh not owned by root")
@@ -951,7 +951,7 @@ class TestNemesis030EngineTrust(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "POSIX")
     def test_engine_must_be_a_regular_file_and_root_clears_a_stale_vouch(self):
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         with self.assertRaises(MP.SandboxMissing):
             isolation._trusted_exe("podman", "/usr/bin")              # a root-owned folder is not an engine
         isolation._VOUCHED["sh"] = "/x/sh"
@@ -959,12 +959,12 @@ class TestNemesis030EngineTrust(unittest.TestCase):
         self.assertNotIn("sh", isolation._VOUCHED)
 
     def test_vouched_engine_named_in_the_description(self):
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         originale = isolation._run_engine
         try:
             isolation._run_engine = lambda *a, **k: (0, False, "wasmtime (WASI)")
             isolation._VOUCHED["wasmtime"] = "/x/wasmtime"
-            self.assertIn("QRAFT_TRUSTED_ENGINES lists it", isolation.run("wasm", "w", "o", 1, 1, [])[2])
+            self.assertIn("RIGOROUS_LEVELS_TRUSTED_ENGINES lists it", isolation.run("wasm", "w", "o", 1, 1, [])[2])
             isolation._VOUCHED.pop("wasmtime")
             self.assertEqual(isolation.run("wasm", "w", "o", 1, 1, [])[2], "wasmtime (WASI)")
         finally:
@@ -972,7 +972,7 @@ class TestNemesis030EngineTrust(unittest.TestCase):
             isolation._VOUCHED.pop("wasmtime", None)
 
     def test_any_root_refused_for_grants(self):
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         roots = [os.path.abspath(os.sep)] + (["Q:\\", "\\\\server\\share\\"] if os.name == "nt" else [])
         for p in roots:                       # Windows: a drive other than the current one was not refused
             with self.assertRaises(MP.OutOfDomain, msg=p):
@@ -984,7 +984,7 @@ class TestNemesis030EngineTrust(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
 
     def test_seatbelt_profile_refuses_a_home_prefix(self):
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         home = isolation._user_homes()[0]
         with self.assertRaises(MP.OutOfDomain):
             isolation.seatbelt_profile(os.path.join(home, "bin", "python3"), [home], "/tmp/x/output.json", "/tmp/x")
@@ -1022,7 +1022,7 @@ class TestBersagliTroncamentoChiuso(unittest.TestCase):
             MP.Request("centrex_tlf", {**self.TLF, "Jmax": -1}, 4, {})
 
 
-from qraft_ra import isolation  # noqa: E402
+from rigorous_levels import isolation  # noqa: E402
 
 
 class TestPrefissoInterprete(unittest.TestCase):
@@ -1126,7 +1126,7 @@ class TestPrefissoInterprete(unittest.TestCase):
         cartelle = [x for x in pezzi if os.path.isdir(x)]
         if not cartelle:
             self.skipTest("interprete sotto /usr: nessun pezzo montato")
-        target = os.path.join(cartelle[0], f"qraft_nemesis_prova_{os.getpid()}.txt")
+        target = os.path.join(cartelle[0], f"rigorous_levels_nemesis_prova_{os.getpid()}.txt")
         try:
             u = MP.run_port(request("test_hostile", truncation={"mode": "write", "path": target}))
             esiste = os.path.exists(target)
@@ -1156,7 +1156,7 @@ class TestProfonditaUscita(unittest.TestCase):
     il limite di annidamento è ora contato prima del parser, uguale su ogni versione di Python."""
 
     def _scrivi_e_leggi(self, testo):
-        d = tempfile.mkdtemp(prefix="qraft_prof_")
+        d = tempfile.mkdtemp(prefix="rigorous_levels_prof_")
         try:
             p = os.path.join(d, "u.json")
             with open(p, "w", encoding="utf-8") as f:
@@ -1276,8 +1276,8 @@ class TestFailClosedProbes(unittest.TestCase):
         try:
             os.mkdir(os.path.join(d, "lib"))
             open(os.path.join(d, "python.wasm"), "wb").close()
-            old = os.environ.get("QRAFT_PYTHON_WASM")
-            os.environ["QRAFT_PYTHON_WASM"] = d
+            old = os.environ.get("RIGOROUS_LEVELS_PYTHON_WASM")
+            os.environ["RIGOROUS_LEVELS_PYTHON_WASM"] = d
             try:
                 if shutil.which("wasmtime") is None:
                     with self.assertRaises(MP.SandboxMissing):
@@ -1287,9 +1287,9 @@ class TestFailClosedProbes(unittest.TestCase):
                         isolation._wasm_parts()
             finally:
                 if old is None:
-                    os.environ.pop("QRAFT_PYTHON_WASM", None)
+                    os.environ.pop("RIGOROUS_LEVELS_PYTHON_WASM", None)
                 else:
-                    os.environ["QRAFT_PYTHON_WASM"] = old
+                    os.environ["RIGOROUS_LEVELS_PYTHON_WASM"] = old
         finally:
             shutil.rmtree(d, ignore_errors=True)
 

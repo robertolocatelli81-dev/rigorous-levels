@@ -16,8 +16,8 @@ import time
 
 import numpy as np
 
-from qraft_ra import Request, run_port, run_ports
-from qraft_ra.isolation import select_engine
+from rigorous_levels import Request, run_port, run_ports
+from rigorous_levels.isolation import select_engine
 
 SITE = tuple(p for p in (sysconfig.get_path("purelib"), site.getusersitepackages()) if p and os.path.isdir(p))
 

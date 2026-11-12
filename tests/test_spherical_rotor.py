@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""Test di qraft_ra/spherical_rotor.py (10/11/2026). Da note dell'autore (non pubblicate) (PREREG, ESITO).
+"""Test di rigorous_levels/spherical_rotor.py (10/11/2026). Da note dell'autore (non pubblicate) (PREREG, ESITO).
 Ogni chiamata port deadline=20 s: un mutante che fa girare il ciclo fino a L_LIMIT/PREC_MAX deve FALLIRE (DeadlineExceeded),
 non bloccare il banco (banco mutanti 10/11: il mutante sul segno del pivot non dava esito)."""
 import importlib.util
@@ -13,7 +13,7 @@ import numpy as np
 
 FLINT = importlib.util.find_spec("flint") is not None
 if FLINT:
-    from qraft_ra import spherical_rotor as RS  # noqa: E402
+    from rigorous_levels import spherical_rotor as RS  # noqa: E402
 
 
 def numpy_livelli(B, dE, M, k, L, Dc=0.0):

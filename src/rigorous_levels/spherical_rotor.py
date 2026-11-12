@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/spherical_rotor.py — SPHERICAL rotor in a field: levels as GUARANTEED intervals [low, high].
+"""rigorous_levels/spherical_rotor.py — SPHERICAL rotor in a field: levels as GUARANTEED intervals [low, high].
 
     H = B N(N+1) − D_c [N(N+1)]² − dE cos θ,   fixed M
         (linear polar molecule: B rotational constant, D_c centrifugal distortion, dE = dipole × field)
 
 Basis |N, M⟩ with N ≥ |M|: diagonal f(N) = B N(N+1) − D_c [N(N+1)]²; cos θ couples only N ↔ N+1, with
     c_N = sqrt( ((N+1)² − M²) / ((2N+1)(2N+3)) )           (Brown–Carrington), and ‖cos θ‖ ≤ 1.
-Same argument as qraft_ra/guaranteed_intervals.py, on the sphere instead of the circle:
+Same argument as rigorous_levels/guaranteed_intervals.py, on the sphere instead of the circle:
   - UPPER bound: λ_j(H) ≤ λ_j(H_L), H_L the compression of H to N ≤ L (Rayleigh–Ritz, Teschl Theorem 4.12(i));
   - LOWER bound: for η > 0, 2bxy ≥ −|b|(x²η/|b| + y²|b|/η) on the single coupling L ↔ L+1 gives
         H ≥ (H_L − η e_L e_Lᵀ) ⊕ H_O′,   H_O′ ≥ t = f(L+1) − dE − (dE c_L)²/η;
@@ -23,8 +23,8 @@ Declared hypotheses: H is the one of the exact float64 parameters; Arb/FLINT is 
 Measurements (2026-11-10, author's repository): the intervals contain the numpy reference at a much larger truncation
 in 177 of 177 cuts; RbCs at 1.2 V/cm gives 130.3 Hz of Stark shift for M = ±1 (Blackmore et al. 2018: 129 Hz).
 
-What it does NOT say: that H describes a molecule. No hyperfine structure (for that: qraft_ra/hyperfine_molecule.py).
-QRAFT-RA is an internal model, not an external validator.
+What it does NOT say: that H describes a molecule. No hyperfine structure (for that: rigorous_levels/hyperfine_molecule.py).
+This package is not an external validator.
 Names: this module was `rotore_sferico_garantito` in 0.2.0 (deprecated aliases in that module).
 """
 from __future__ import annotations
@@ -37,9 +37,9 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from qraft_ra._compat import add_field_aliases
-from qraft_ra._deterministic import tridiagonal_lowest
-from qraft_ra.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint
+from rigorous_levels._compat import add_field_aliases
+from rigorous_levels._deterministic import tridiagonal_lowest
+from rigorous_levels.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint
 
 __all__ = ["SphericalRotor", "guaranteed_sphere_levels", "transition", "OutOfDomain", "ArbMissing", "DeadlineExceeded"]
 

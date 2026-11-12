@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/matrix_elements.py — GUARANTEED matrix elements ⟨v_i|X|v_j⟩ between eigenvectors of the charge-basis
+"""rigorous_levels/matrix_elements.py — GUARANTEED matrix elements ⟨v_i|X|v_j⟩ between eigenvectors of the charge-basis
 rotor, for X = n (charge), cos mφ, sin mφ: what enters T1 (Purcell, charge coupling), g, Rabi rates.
 
     H = 4E_C(n − n_g)² + Σ_m c_m cos(mφ)       (cosines only, as in guaranteed_intervals)
@@ -24,7 +24,7 @@ of the true eigenvectors v_j of H and the error is BOUNDED (docs/PROOF.md):
 
 Every quantity is rational except the two integer square roots; the enclosure [low, high] is rigorous for the H
 written, truncation included (the residual is against the full operator), under the hypotheses of guaranteed_intervals.
-QRAFT-RA is an internal model, not an external validator."""
+This package is not an external validator."""
 from __future__ import annotations
 
 import math
@@ -35,9 +35,9 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from qraft_ra._deterministic import band_eigenvector, band_lowest
-from qraft_ra.guaranteed_intervals import GUARANTEED, Intervals, OutOfDomain, guaranteed_levels
-from qraft_ra.rotor_spectrum import InputRejected, Rotor
+from rigorous_levels._deterministic import band_eigenvector, band_lowest
+from rigorous_levels.guaranteed_intervals import GUARANTEED, Intervals, OutOfDomain, guaranteed_levels
+from rigorous_levels.rotor_spectrum import InputRejected, Rotor
 
 __all__ = ["MatrixElement", "guaranteed_matrix_element", "OutOfDomain"]
 

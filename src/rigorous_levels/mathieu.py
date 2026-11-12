@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/mathieu.py — Mathieu characteristic values a_r(q), b_r(q) as GUARANTEED intervals [low, high].
+"""rigorous_levels/mathieu.py — Mathieu characteristic values a_r(q), b_r(q) as GUARANTEED intervals [low, high].
 
     y'' + (a − 2q cos 2z) y = 0            (DLMF 28.2.1), q any finite real (negative and large included)
 
@@ -30,7 +30,7 @@ Why this exists: scipy.special.mathieu_a/mathieu_b return the value of another o
 #4479, #14526; 522 wrong values on r ≤ 12, |q| ≤ 400 with scipy 1.10.1 … 1.18.1, measured 2026-11-11; fixed on
 scipy main by PR #25128, milestone 2.0.0). qiskit-metal's `mathieu_level` inherits it (qiskit-metal #1252). Here the
 order is guaranteed by the count, not by a root finder.
-QRAFT-RA is an internal model, not an external validator."""
+This package is not an external validator."""
 from __future__ import annotations
 
 import math
@@ -41,9 +41,9 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from qraft_ra._deterministic import tridiagonal_lowest
-from qraft_ra.guaranteed_intervals import ArbMissing, DeadlineExceeded, OutOfDomain, _finite, _flint, _refuse_overflow
-from qraft_ra.spherical_rotor import _ball, _count_below
+from rigorous_levels._deterministic import tridiagonal_lowest
+from rigorous_levels.guaranteed_intervals import ArbMissing, DeadlineExceeded, OutOfDomain, _finite, _flint, _refuse_overflow
+from rigorous_levels.spherical_rotor import _ball, _count_below
 
 __all__ = ["MathieuValue", "mathieu_value", "mathieu_a", "mathieu_b", "sector", "OutOfDomain", "ArbMissing",
            "DeadlineExceeded"]

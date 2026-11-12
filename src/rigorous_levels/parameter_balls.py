@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/parameter_balls.py — levels of the charge-basis rotor when the PARAMETERS are intervals (boxes).
+"""rigorous_levels/parameter_balls.py — levels of the charge-basis rotor when the PARAMETERS are intervals (boxes).
 
     H(E_C, c) = 4 E_C (n − n_g)² + Σ_m c_m cos(mφ),   E_C ∈ [E_C⁻, E_C⁺],  c_m ∈ [c_m⁻, c_m⁺],  n_g exact
 
@@ -27,7 +27,7 @@ band edges inside), for every (E_C, c, n_g) in the box:
 The result is rigorous and may be much wider than the true spread of the levels (the Lipschitz constant 1 in each
 c_m is attained only by a level that follows −E_J cos φ rigidly): the width reported is the width of the box
 interval, and `RotorBall` reports ρ separately. An n_g interval longer than 1 is the whole band (G = {0, ½}).
-QRAFT-RA is an internal model, not an external validator."""
+This package is not an external validator."""
 from __future__ import annotations
 
 import math
@@ -35,8 +35,8 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Dict, Mapping, Optional, Tuple
 
-from qraft_ra.guaranteed_intervals import GUARANTEED, WIDE, Intervals, OutOfDomain, guaranteed_levels
-from qraft_ra.rotor_spectrum import InputRejected, Rotor
+from rigorous_levels.guaranteed_intervals import GUARANTEED, WIDE, Intervals, OutOfDomain, guaranteed_levels
+from rigorous_levels.rotor_spectrum import InputRejected, Rotor
 
 __all__ = ["RotorBall", "guaranteed_levels_over_box", "OutOfDomain"]
 

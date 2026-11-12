@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/multiport.py — MULTIPORT: a closed, versioned interface ("qraft-port/0.3", docs/PORT_CONTRACT.md) through
+"""rigorous_levels/multiport.py — MULTIPORT: a closed, versioned interface ("rigorous-levels-port/0.3", docs/PORT_CONTRACT.md) through
 which an EXTERNAL solver runs inside a sandbox and its result is compared with the guaranteed intervals.
 
 Other people's code is untrusted by construction: it runs in a separate process inside one of the declared ISOLATION
@@ -22,11 +22,12 @@ sandbox to a plain subprocess is a vulnerability: CVE-2026-57144 in another prod
 The output is a JSON validated against a CLOSED schema (unknown key, wrong type, NaN, length ≠ k, different unit or
 contract = INVALID / NOT_COMPARABLE with the reason). Per-level verdict: INSIDE / INSIDE_TOLERANCE / OUTSIDE (with
 the distance) / NOT_COMPARABLE (with the reason), in exact fractions.
-Runner: qraft_ra/port_runner.py. Specification: docs/PORT_CONTRACT.md (written before the code).
+Runner: rigorous_levels/port_runner.py. Specification: docs/PORT_CONTRACT.md (written before the code).
 What it is NOT: a certificate of the computation; a virtual machine; a judgement on the physics of the other solver.
-QRAFT-RA is an internal model, not an external validator.
-Names: this module was `multiporta` in 0.2.0 (deprecated aliases in that module); the contract "qraft-porta/0.1"
-(Italian keys) and "qraft-port/0.2" are superseded by "qraft-port/0.3" (§8 batches added) and no longer accepted."""
+This package is not an external validator.
+Names: this module was `multiporta` in 0.2.0 (deprecated aliases in that module); the contracts of the earlier
+private versions (0.1 with Italian keys, 0.2 without the §8 batches) are superseded by "rigorous-levels-port/0.3" and
+no longer accepted."""
 from __future__ import annotations
 
 import json
@@ -41,15 +42,15 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from qraft_ra import isolation
-from qraft_ra._compat import add_field_aliases
-from qraft_ra.guaranteed_intervals import Intervals, OutOfDomain
-from qraft_ra.isolation import ENGINES, SandboxMissing  # noqa: F401
+from rigorous_levels import isolation
+from rigorous_levels._compat import add_field_aliases
+from rigorous_levels.guaranteed_intervals import Intervals, OutOfDomain
+from rigorous_levels.isolation import ENGINES, SandboxMissing  # noqa: F401
 
 __all__ = ["CONTRACT", "PORTS", "ENGINES", "Request", "Output", "Verdict", "SandboxMissing", "run_port", "run_ports",
            "compare", "validate_output", "read_output", "site_packages_of", "OutOfDomain"]
 
-CONTRACT = "qraft-port/0.3"
+CONTRACT = "rigorous-levels-port/0.3"
 UNITS = {"GHz": Fraction(10 ** 9), "MHz": Fraction(10 ** 6), "Hz": Fraction(1)}
 SECONDS_MAX, MEM_MIB_MAX, LEVELS_MAX = 3600, 65536, 10000       # declared caps (seconds 2**31 gave OverflowError)
 OUTPUT_MAX_BYTES = 1 << 20                                      # the output is read for at most 1 MiB (×n for a batch)
@@ -336,8 +337,8 @@ def run_ports(requests, python: Optional[str] = None, *, engine: str = "auto", i
         isolation.probe(engine, image)
     seconds = min(sum(r.seconds for r in reqs), SECONDS_MAX)
     mem = max(r.mem_mib for r in reqs)
-    work = tempfile.mkdtemp(prefix="qraft_port_")
-    outdir = tempfile.mkdtemp(prefix="qraft_out_")
+    work = tempfile.mkdtemp(prefix="rigorous_levels_port_")
+    outdir = tempfile.mkdtemp(prefix="rigorous_levels_out_")
     try:
         with open(os.path.join(work, "requests.json"), "w", encoding="utf-8") as f:
             json.dump([r.json() for r in reqs], f)
@@ -392,8 +393,8 @@ def run_port(r: Request, python: Optional[str] = None, *, engine: str = "auto", 
         engine, _ = isolation.select_engine(image)
     else:
         isolation.probe(engine, image)                 # fail-closed before anything is written
-    work = tempfile.mkdtemp(prefix="qraft_port_")
-    outdir = tempfile.mkdtemp(prefix="qraft_out_")
+    work = tempfile.mkdtemp(prefix="rigorous_levels_port_")
+    outdir = tempfile.mkdtemp(prefix="rigorous_levels_out_")
     try:
         with open(os.path.join(work, "request.json"), "w", encoding="utf-8") as f:
             json.dump(r.json(), f)

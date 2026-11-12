@@ -15,17 +15,17 @@ from fractions import Fraction
 
 import numpy as np
 
-from qraft_ra import multiport as MP
-from qraft_ra import rotor_spectrum as RS
+from rigorous_levels import multiport as MP
+from rigorous_levels import rotor_spectrum as RS
 
 FLINT = importlib.util.find_spec("flint") is not None
 if FLINT:
-    from qraft_ra import duffing_vs_transmon as DT  # noqa: E402
-    from qraft_ra import fluxonium as FX  # noqa: E402
-    from qraft_ra import guaranteed_intervals as GI  # noqa: E402
-    from qraft_ra import hyperfine_molecule as HM  # noqa: E402
-    from qraft_ra import mathieu as MA  # noqa: E402
-    from qraft_ra import spherical_rotor as SR  # noqa: E402
+    from rigorous_levels import duffing_vs_transmon as DT  # noqa: E402
+    from rigorous_levels import fluxonium as FX  # noqa: E402
+    from rigorous_levels import guaranteed_intervals as GI  # noqa: E402
+    from rigorous_levels import hyperfine_molecule as HM  # noqa: E402
+    from rigorous_levels import mathieu as MA  # noqa: E402
+    from rigorous_levels import spherical_rotor as SR  # noqa: E402
 
 RND = random.Random(20261111)
 BAD_NUMBERS = [float("nan"), float("inf"), -float("inf"), True, False, None, "1", "1.0", b"1", [1], (1,), {"x": 1},

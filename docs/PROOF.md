@@ -1,6 +1,6 @@
 # Why the intervals contain the true eigenvalues
 
-This is the argument implemented in `qraft_ra.guaranteed_intervals`. The assembly of the steps is the author's; it has
+This is the argument implemented in `rigorous_levels.guaranteed_intervals`. The assembly of the steps is the author's; it has
 had no external human review (its adversarial reviews were automated, by an independent agent, reports in the author's
 repository); each step is standard and cited.
 
@@ -75,7 +75,7 @@ element is built on the float eigenvector). Until 2026-11-12 the estimates came 
 `eig_banded`, `eigvalsh_tridiagonal`), whose last bits depend on the BLAS/LAPACK kernel: the published ends changed
 with `OPENBLAS_CORETYPE` and between CI machines, while staying correct.
 
-Since then every estimate comes from `qraft_ra._deterministic`, which uses only Python float operations whose result
+Since then every estimate comes from `rigorous_levels._deterministic`, which uses only Python float operations whose result
 IEEE 754 fixes bit for bit (+, −, ×, ÷, comparisons, `math.sqrt`, `math.fsum`, `math.ldexp`/`frexp`, `float()` of an
 int or a Fraction) in a fixed order: bisection on the Sturm count (tridiagonal), Householder reduction then the same
 bisection (dense), bisection on the LDLᵀ inertia (band), inverse iteration with banded partial pivoting from a fixed
@@ -140,7 +140,7 @@ RbCs with the constants of Gregory et al. 2016 reproduces their 16 hyperfine tra
 
 ## Mathieu characteristic values (0.3.0)
 
-`qraft_ra.mathieu`: a_r(q), b_r(q) are the eigenvalues of the four Jacobi matrices of the Fourier sectors (DLMF
+`rigorous_levels.mathieu`: a_r(q), b_r(q) are the eigenvalues of the four Jacobi matrices of the Fourier sectors (DLMF
 28.4): d_k = (2k+ν)² on the diagonal, q off the diagonal, except (0,1) = √2·q for a_{2n} and d_0 = 1 ± q for
 a_{2n+1} / b_{2n+1}; b_{2n+2} starts at k = 1. The three steps above apply on each sector with the cut K:
 
@@ -161,7 +161,7 @@ scipy 1.17.1/1.18.1: 52 values outside, all confirmed wrong by an independent tr
 
 ## Fluxonium in the oscillator basis (0.3.0)
 
-`qraft_ra.fluxonium`: H = H_0 + V with H_0 = ω(a†a + ½), ω = √(8E_LE_C), V = −E_J cos(φ − φ_ext), ‖V‖ ≤ E_J,
+`rigorous_levels.fluxonium`: H = H_0 + V with H_0 = ω(a†a + ½), ω = √(8E_LE_C), V = −E_J cos(φ − φ_ext), ‖V‖ ≤ E_J,
 φ = φ_zpf(a + a†). V is dense in the Fock basis: cos(φ − φ_ext)_{mn} = cos(π(|m−n|/2 − 2·flux)) · g_{mn} with
 g_{mn} = φ_zpf^{d} e^{−φ_zpf²/2} √(min!/max!) L_min^{(d)}(φ_zpf²), d = |m − n| (matrix elements of the displacement
 operator D(iφ_zpf)); built in Arb from the exact rationals 2E_C/E_L and 8E_LE_C.
@@ -183,7 +183,7 @@ least one level (negative control); with a vanishing E_J the levels are ω(j+½)
 
 ## Parameters as intervals (0.3.0)
 
-`qraft_ra.parameter_balls`: for the charge-basis rotor H(E_C, c) = 4E_C(n − n_g)² + Σ c_m cos(mφ) with E_C ∈ [E_C⁻, E_C⁺]
+`rigorous_levels.parameter_balls`: for the charge-basis rotor H(E_C, c) = 4E_C(n − n_g)² + Σ c_m cos(mφ) with E_C ∈ [E_C⁻, E_C⁺]
 and c_m ∈ [c_m⁻, c_m⁺] (n_g exact):
 
 - E_C ↦ λ_j is non-decreasing: H(E_C⁺) − H(E_C⁻) = 4(E_C⁺ − E_C⁻)(n − n_g)² ≥ 0 as a quadratic form on the common
@@ -206,7 +206,7 @@ Measured (2026-11-11, bench/parameter_balls.py): see README "Measurements".
 
 ## Matrix elements between eigenvectors (0.3.0)
 
-`qraft_ra.matrix_elements`: the eigenvectors are not enclosed directly; the float eigenvectors ψ_j of H_N are
+`rigorous_levels.matrix_elements`: the eigenvectors are not enclosed directly; the float eigenvectors ψ_j of H_N are
 approximations whose distance from the true v_j is bounded.
 
 - Residual, exact: r_j = (H − λ̃_j)ψ_j with λ̃_j the midpoint of the guaranteed enclosure of λ_j; ψ_j has finite

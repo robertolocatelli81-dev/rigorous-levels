@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra.guaranteed_intervals — rotor levels as GUARANTEED intervals [low, high].
+"""rigorous_levels.guaranteed_intervals — rotor levels as GUARANTEED intervals [low, high].
 
-    H = 4 E_C (n − n_g)² + Σ_m c_m cos(mφ)        (same H as qraft_ra.rotor_spectrum, cosines only, 1 ≤ m ≤ 24)
+    H = 4 E_C (n − n_g)² + Σ_m c_m cos(mφ)        (same H as rigorous_levels.rotor_spectrum, cosines only, 1 ≤ m ≤ 24)
 
 For j < k:   λ_j(H_N′) ≤ λ_j(H) ≤ λ_j(H_N)
 
@@ -19,7 +19,7 @@ Full argument and sources: docs/PROOF.md. python-flint is optional: if it is mis
 the reason and no number is returned. Names: this module was `intervallo_garantito` in 0.2.0 (deprecated aliases).
 
 What it does NOT say: that H describes a device. The interval contains the true value of THIS H. Correctness rests
-on Arb/FLINT and on this code. QRAFT-RA is an internal model, not an external validator.
+on Arb/FLINT and on this code. This package is not an external validator.
 """
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from qraft_ra._compat import add_field_aliases, deprecated_function
-from qraft_ra._deterministic import band_eigenvector, band_lowest
+from rigorous_levels._compat import add_field_aliases, deprecated_function
+from rigorous_levels._deterministic import band_eigenvector, band_lowest
 
 K_MAX = 20            # largest number of levels
 M_MAX = 24            # largest harmonic m (raised from 8 to 24 on 2026-11-09)
@@ -100,7 +100,7 @@ def check_domain(r, k: int) -> None:
         raise OutOfDomain(f"k must be an integer between 1 and {K_MAX}")
     # The theorem needs E_C > 0 and distinct integer harmonics 1 ≤ m: the Rotor constructor guarantees it, any other
     # object with the same attributes does not (m = 0, a repeated m or E_C < 0 gave false intervals before 2026-11-08).
-    from qraft_ra.rotor_spectrum import Rotor
+    from rigorous_levels.rotor_spectrum import Rotor
     if not isinstance(r, Rotor):
         raise OutOfDomain(f"expected a Rotor, got {type(r).__name__}")
     ms = [m for m, _ in r.cosines]

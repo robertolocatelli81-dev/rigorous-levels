@@ -2,7 +2,7 @@
 # Copyright 2026 Roberto Locatelli
 """Guaranteed matrix elements between eigenvectors of the transmon: the charge element ⟨0|n|1⟩ (coupling, Purcell)
 and ⟨0|cos φ|1⟩, with the bound on the eigenvector error that makes them rigorous (docs/PROOF.md)."""
-from qraft_ra import Rotor, guaranteed_matrix_element
+from rigorous_levels import Rotor, guaranteed_matrix_element
 
 r = Rotor.transmon(0.3, 15.0, n_g=0.25)
 e = guaranteed_matrix_element(r, 0, 1, "n")           # the sign of an eigenvector is arbitrary: report |element|

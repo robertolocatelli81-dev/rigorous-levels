@@ -44,7 +44,7 @@ run_one() {   # venv stack sandbox_state
     case "$stack" in default) ;; unlimited) ulimit -s unlimited ;; *) ulimit -s "$stack" ;; esac
     "$py" -m pip install -q --no-deps --force-reinstall "$ROOT" >/dev/null 2>&1
     cd "$ROOT/tests"
-    "$py" -c 'import qraft_ra; assert "site-packages" in qraft_ra.__file__' || { echo "NOT INSTALLED" ; exit 3; }
+    "$py" -c 'import rigorous_levels; assert "site-packages" in rigorous_levels.__file__' || { echo "NOT INSTALLED" ; exit 3; }
     nice -n "$NICE" "$py" -B -m unittest -v $TESTS > "$tag.log" 2>&1
     echo $? > "$tag.rc"
   )

@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""`qraft_ra.check(scqubits_obj)` at ncut = 30 on the two 200-transmon sets of bench/readme_numbers.py (README
+"""`rigorous_levels.check(scqubits_obj)` at ncut = 30 on the two 200-transmon sets of bench/readme_numbers.py (README
 "Measurements"): the device regime (E_C ~ U(0.05, 1), E_J/E_C = 10^U(0, 3), seed 20261108) and the wide range
 (E_C = 1, E_J/E_C = 10^U(−1, 6), seed 7, where scqubits at ncut 30 is wrong in 65 cases): the guaranteed verdict
 against the adapter's doubling rule and against the truth.
 
-    python bench/check_200.py OUT.json        # needs qraft_ra[scqubits]
+    python bench/check_200.py OUT.json        # needs rigorous_levels[scqubits]
 
 For every case: (a) `check(Transmon(ncut=30), tolerance=1e-6)` → OUTSIDE/INSIDE (1e-6 GHz = the absolute part of the
 rule "scq-threshold/1.0", so that the two verdicts are comparable); (b) the adapter's doubling verdict at ncut 30
@@ -20,7 +20,7 @@ import time
 import numpy as np
 import scqubits as sq
 
-from qraft_ra import check, scqubits_spectrum, Rotor
+from rigorous_levels import check, scqubits_spectrum, Rotor
 
 sq.settings.PROGRESSBAR_DISABLED = True
 

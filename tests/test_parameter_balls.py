@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""Tests of qraft_ra/parameter_balls.py (parameters as intervals) and of the entry from scqubits objects
+"""Tests of rigorous_levels/parameter_balls.py (parameters as intervals) and of the entry from scqubits objects
 (scqubits_adapter.guaranteed_from_scqubits): every point of the box falls inside the box interval (positive), a point
 outside the box falls outside for a level that moves (negative control), exact parameters reduce to the point
 intervals, closed inputs."""
@@ -11,8 +11,8 @@ from fractions import Fraction
 FLINT = importlib.util.find_spec("flint") is not None
 SCQUBITS = importlib.util.find_spec("scqubits") is not None
 if FLINT:
-    from qraft_ra import Rotor, RotorBall, guaranteed_levels, guaranteed_levels_over_box  # noqa: E402
-    from qraft_ra.parameter_balls import OutOfDomain  # noqa: E402
+    from rigorous_levels import Rotor, RotorBall, guaranteed_levels, guaranteed_levels_over_box  # noqa: E402
+    from rigorous_levels.parameter_balls import OutOfDomain  # noqa: E402
 
 
 @unittest.skipUnless(FLINT, "python-flint absent")
@@ -148,7 +148,7 @@ class TestChargeOffsetInterval(unittest.TestCase):
 class TestFromScqubits(unittest.TestCase):
     def test_transmon_inside_and_outside(self):
         import scqubits as sq
-        from qraft_ra import guaranteed_from_scqubits
+        from rigorous_levels import guaranteed_from_scqubits
         sq.settings.PROGRESSBAR_DISABLED = True
         c = guaranteed_from_scqubits(sq.Transmon(EJ=15.0, EC=0.3, ng=0.25, ncut=30), 4)
         self.assertEqual((c.kind, c.cutoff, c.verdict.overall), ("Transmon", 30, "INSIDE"))
@@ -159,8 +159,8 @@ class TestFromScqubits(unittest.TestCase):
 
     def test_fluxonium_and_refusals(self):
         import scqubits as sq
-        from qraft_ra import guaranteed_from_scqubits
-        from qraft_ra.rotor_spectrum import InputRejected
+        from rigorous_levels import guaranteed_from_scqubits
+        from rigorous_levels.rotor_spectrum import InputRejected
         sq.settings.PROGRESSBAR_DISABLED = True
         c = guaranteed_from_scqubits(sq.Fluxonium(EJ=2.052, EC=0.567, EL=0.835, flux=0.5, cutoff=110), 3, 1e-9)
         self.assertEqual((c.kind, c.cutoff), ("Fluxonium", 110))

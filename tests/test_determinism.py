@@ -46,7 +46,7 @@ class TestFixedStrings(unittest.TestCase):
         version of Arb may round a radius differently, which is allowed by the goal and skipped here with the reason)."""
         if _flint_version() != FLINT_VERSION:
             self.skipTest(f"python-flint {_flint_version()}: the fixed strings are for {FLINT_VERSION}")
-        from qraft_ra.reproduce import determinism_parts
+        from rigorous_levels.reproduce import determinism_parts
         got = {name: hashlib.sha256("\n".join(ss).encode()).hexdigest()[:12] for name, ss in determinism_parts()}
         self.assertEqual(got, EXPECTED)
 
@@ -54,7 +54,7 @@ class TestFixedStrings(unittest.TestCase):
         """The fluxonium entry spelled out: the first level of the hash case, ends as exact decimal strings."""
         if _flint_version() != FLINT_VERSION:
             self.skipTest(f"python-flint {_flint_version()}: the fixed strings are for {FLINT_VERSION}")
-        from qraft_ra import Fluxonium, guaranteed_fluxonium_levels
+        from rigorous_levels import Fluxonium, guaranteed_fluxonium_levels
         iv = guaranteed_fluxonium_levels(Fluxonium(E_C=0.567, E_J=2.052, E_L=0.835, flux=0.5), 3, 1e-9)
         self.assertEqual((str(iv.low[0]), str(iv.high[0])), FLUXONIUM_0)
 
@@ -66,7 +66,7 @@ FLUXONIUM_0 = ("33641487192716065069672811/19342813113834066795298816",
 # computed in a fresh interpreter per BLAS kernel; written with the public API only, so that the same script also runs
 # on the code before this change (where it printed different strings under Prescott and Nehalem)
 SCRIPT = r"""
-from qraft_ra import (Fluxonium, Rotor, SigmaMolecule, SphericalRotor, guaranteed_fluxonium_levels, guaranteed_levels,
+from rigorous_levels import (Fluxonium, Rotor, SigmaMolecule, SphericalRotor, guaranteed_fluxonium_levels, guaranteed_levels,
                       guaranteed_matrix_element, guaranteed_molecule_levels, guaranteed_sphere_levels, mathieu_a)
 out = []
 out += [str(x) for x in guaranteed_fluxonium_levels(Fluxonium(E_C=0.567, E_J=2.052, E_L=0.835, flux=0.5), 3, 1e-9).low]
@@ -138,7 +138,7 @@ class TestNoLapackInGuaranteedPaths(unittest.TestCase):
         try:
             with self.assertRaises(AssertionError):                       # negative control: the patch is live
                 np.linalg.eigvalsh(np.eye(2))
-            from qraft_ra.reproduce import determinism_parts
+            from rigorous_levels.reproduce import determinism_parts
             names = [name for name, _ in determinism_parts()]
             self.assertEqual(names, list(EXPECTED))
         finally:
@@ -150,7 +150,7 @@ class TestFloatDecisions(unittest.TestCase):
     """The float decisions outside the estimators: overflow is refused, φ_zpf and the fluxonium cuts are spelled out."""
 
     def test_overflowing_estimate_is_refused(self):
-        from qraft_ra import _deterministic as D
+        from rigorous_levels import _deterministic as D
         big = 1.7e308
         with self.assertRaises(OverflowError):                     # λ = 2·1.7e308 is beyond float64
             D.band_lowest([big, big], {1: [big]}, 2)
@@ -160,7 +160,7 @@ class TestFloatDecisions(unittest.TestCase):
         self.assertLess(max(abs(got[0] - 1.0), abs(got[1] - 3.0)), 1e-15)
 
     def test_phi_zpf_and_cuts(self):
-        from qraft_ra import fluxonium as F
+        from rigorous_levels import fluxonium as F
         f = F.Fluxonium(E_C=1.0, E_J=1.0, E_L=0.01, flux=0.25)
         self.assertLess(abs(f.phi_zpf ** 4 - 200.0), 1e-12)
         seen = []
@@ -190,7 +190,7 @@ class TestEstimators(unittest.TestCase):
 
     def test_against_numpy(self):
         import numpy as np
-        from qraft_ra import _deterministic as D
+        from rigorous_levels import _deterministic as D
         rng = random.Random(20261112)
         for _ in range(40):
             n = rng.randint(3, 60)
@@ -230,13 +230,13 @@ class TestEstimators(unittest.TestCase):
     def test_zero_pivot_counts_as_negative(self):
         """LAPACK dlaebz convention, fixed here so that it cannot change silently: a pivot of exactly 0 (|q| ≤ pivmin)
         is replaced by −pivmin, so the eigenvalue 0 of diag(0, 5) counts as below x = 0; and the band count agrees."""
-        from qraft_ra import _deterministic as D
+        from rigorous_levels import _deterministic as D
         self.assertEqual(D.sturm_count([0.0, 5.0], [0.0], 0.0, D._pivmin([0.0])), 1)
         self.assertEqual(D.sturm_count([5.0, 0.0], [0.0], 0.0, D._pivmin([0.0])), 1)
         self.assertEqual(D.band_count([0.0, 5.0, 7.0], {2: [0.0]}, 2, 0.0, D.SAFMIN), 1)
 
     def test_first_index(self):
-        from qraft_ra import _deterministic as D
+        from rigorous_levels import _deterministic as D
         d = [float(i * i) for i in range(30)]
         e2 = [4.0] * 29
         self.assertEqual(D.tridiagonal_lowest(d, e2, 6, first=5), D.tridiagonal_lowest(d, e2, 6)[5:])

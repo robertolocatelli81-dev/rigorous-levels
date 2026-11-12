@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""Test di qraft_ra/duffing_vs_transmon.py (11/11/2026). Spec: note dell'autore (non pubblicate)."""
+"""Test di rigorous_levels/duffing_vs_transmon.py (11/11/2026). Spec: note dell'autore (non pubblicate)."""
 import importlib.util
 import unittest
 from fractions import Fraction
@@ -9,7 +9,7 @@ import numpy as np
 
 FLINT = importlib.util.find_spec("flint") is not None
 if FLINT:
-    from qraft_ra import duffing_vs_transmon as DT
+    from rigorous_levels import duffing_vs_transmon as DT
 
 
 def transmon_numpy(ec, ej, ng, k, ncut=60):
@@ -79,7 +79,7 @@ class TestDuffing(unittest.TestCase):
         guaranteed_levels è sostituita da intervals LARGHI [E−w_j, E+w_j]: ω, α e δ_j devono contenere il valore
         in OGNI vertice della scatola (enumerazione esatta) e coincidere con la formula della specifica."""
         from itertools import product
-        from qraft_ra.guaranteed_intervals import Intervals
+        from rigorous_levels.guaranteed_intervals import Intervals
         E = [Fraction(-12), Fraction(-6), Fraction(-1), Fraction(4), Fraction(9)]
         w = [Fraction(1, 10), Fraction(1, 5), Fraction(3, 10), Fraction(2, 5), Fraction(1, 2)]
         low = tuple(e - x for e, x in zip(E, w))

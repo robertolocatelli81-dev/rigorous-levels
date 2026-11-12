@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/scqubits_adapter.py — scqubits as an optional engine, with the convergence warning scqubits does not give.
+"""rigorous_levels/scqubits_adapter.py — scqubits as an optional engine, with the convergence warning scqubits does not give.
 
 scqubits (BSD-3, https://scqubits.readthedocs.io) diagonalizes the transmon on a charge basis truncated at the `ncut`
 chosen by the user; its documentation leaves the convergence check to the user. With ncut = 30 it is wrong without a
@@ -20,7 +20,7 @@ warning beyond E_J/E_C ≈ 7700 (measured 2026-11-07). Here:
     the field `threshold_origin` (absolute/relative/user/floor); if the floor decides, the state is OK_FLOAT_FLOOR.
     The old relative rule (1e-6·max(1, largest transition), units hidden in the max) was removed in 0.2.0.
   - `engine="process"` imports scqubits IN the process (declared: other people's code, not trusted);
-    `engine="sandbox"` runs the port `scqubits_transmon` of qraft_ra/multiport.py in the sandbox (fail-closed: without a
+    `engine="sandbox"` runs the port `scqubits_transmon` of rigorous_levels/multiport.py in the sandbox (fail-closed: without a
     sandbox engine no number).
   - `compare(r, k)`: cross-check against our solver (`rotor_spectrum.spectrum`), shift on the transitions E_j − E_0.
 
@@ -43,8 +43,8 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from qraft_ra._compat import add_field_aliases
-from qraft_ra.rotor_spectrum import (NOT_CONVERGED, OK, InputRejected, Rotor, _finite_real,
+from rigorous_levels._compat import add_field_aliases
+from rigorous_levels.rotor_spectrum import (NOT_CONVERGED, OK, InputRejected, Rotor, _finite_real,
                                      spectrum as _our_spectrum)
 
 UNCHECKED = "UNCHECKED"                 # 0.2.0: NON_CONTROLLATO
@@ -70,7 +70,7 @@ def _import_scqubits():
         import scqubits as sq            # lazy import: optional dependency
     except ImportError as e:
         raise ScqubitsMissing(f"scqubits is not installed ({e}); install scqubits==4.3.1 or use "
-                              f"qraft_ra.rotor_spectrum.spectrum") from None
+                              f"rigorous_levels.rotor_spectrum.spectrum") from None
     sq.settings.PROGRESSBAR_DISABLED = True
     return sq
 
@@ -118,7 +118,7 @@ def _eigenvalues(sq, ec: float, ej: float, ng: float, ncut: int, k: int) -> np.n
 
 def _eigenvalues_sandbox(ec: float, ej: float, ng: float, ncut: int, k: int, unit: str, seconds: int) -> Tuple[np.ndarray, str]:
     """The port scqubits_transmon of the multiport, in the sandbox. No number if the sandbox or scqubits are missing."""
-    from qraft_ra import multiport as MP
+    from rigorous_levels import multiport as MP
     import site
     import sysconfig
     sp = tuple(p for p in (sysconfig.get_path("purelib"), site.getusersitepackages()) if p and os.path.isdir(p))
@@ -225,9 +225,9 @@ class ScqubitsCheck:
     """Guaranteed intervals for the H of a scqubits object, and the verdict on its own levels at its own cutoff."""
 
     kind: str                       # "Transmon" | "Fluxonium"
-    intervals: object               # qraft_ra.guaranteed_intervals.Intervals
+    intervals: object               # rigorous_levels.guaranteed_intervals.Intervals
     levels: Tuple[float, ...]       # the object's eigenvals at its cutoff (ncut / cutoff), GHz
-    verdict: object                 # qraft_ra.multiport.Verdict: INSIDE / INSIDE_TOLERANCE / OUTSIDE per level
+    verdict: object                 # rigorous_levels.multiport.Verdict: INSIDE / INSIDE_TOLERANCE / OUTSIDE per level
     tolerance: float                # float tolerance used (GHz): the adapter's floor rule on the object's cutoff
     cutoff: int
 
@@ -238,8 +238,8 @@ def guaranteed_from_scqubits(qubit, k: int = 6, width: float = 1e-10, *, toleran
     `scqubits.Fluxonium(EJ, EC, EL, flux, cutoff)` → guaranteed intervals of ITS H (same convention: GHz, h = 1) and
     the verdict of its own `eigenvals()` against them, with the float tolerance 32·eps·‖H‖ declared. Anything else
     is refused (closed list of classes, read by name and attributes: scqubits is not imported here)."""
-    from qraft_ra import multiport as MP
-    from qraft_ra.guaranteed_intervals import guaranteed_levels
+    from rigorous_levels import multiport as MP
+    from rigorous_levels.guaranteed_intervals import guaranteed_levels
     name = type(qubit).__name__
     k = _integer(k, "k", 1)
     if name == "Transmon":
@@ -248,7 +248,7 @@ def guaranteed_from_scqubits(qubit, k: int = 6, width: float = 1e-10, *, toleran
         cut = int(cut)
         tol = FLOOR_FACTOR * EPS * norm_H(ec, ej, ng, cut)
     elif name == "Fluxonium":
-        from qraft_ra.fluxonium import Fluxonium, guaranteed_fluxonium_levels
+        from rigorous_levels.fluxonium import Fluxonium, guaranteed_fluxonium_levels
         ec, ej, el, flux, cut = (float(getattr(qubit, a)) for a in ("EC", "EJ", "EL", "flux", "cutoff"))
         iv = guaranteed_fluxonium_levels(Fluxonium(E_C=ec, E_J=ej, E_L=el, flux=flux), k, width, deadline=deadline)
         cut = int(cut)
@@ -271,7 +271,7 @@ def assert_inside(levels, intervals, tolerance: float = 0.0, unit: str = "GHz") 
     """Assertion helper for other people's regression tests: `levels` (any float sequence, in `unit`) must fall
     inside the guaranteed `intervals` (within `tolerance`, same unit as the intervals: GHz); otherwise AssertionError
     with the per-level verdict. Fewer or more levels than intervals is an error too (never a partial pass)."""
-    from qraft_ra import multiport as MP
+    from rigorous_levels import multiport as MP
     try:
         lev = tuple(float(x) for x in levels)
     except (TypeError, ValueError, OverflowError):

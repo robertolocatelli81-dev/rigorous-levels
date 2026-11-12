@@ -4,6 +4,15 @@ All dates are from the author's system clock (Europe/Rome). Nothing here is publ
 
 ## 0.3.0 — 2026-11-11 (local, unreleased; branch dev-0.3 from 7beff99)
 
+### Name (2026-11-12)
+
+The package was developed privately under the working name `qraft-ra` (never released). Before the first release it
+is renamed `rigorous-levels`, a name that says what it computes: distribution `rigorous-levels`, module
+`rigorous_levels`, environment variables `QRAFT_*` → `RIGOROUS_LEVELS_*` (`RIGOROUS_LEVELS_TRUSTED_ENGINES`,
+`RIGOROUS_LEVELS_HOST_LIMITS`, …; `QRAFT_BERSAGLI_VENV` → `RIGOROUS_LEVELS_TARGETS_VENV`), port contract
+`qraft-port/0.3` → `rigorous-levels-port/0.3`, AppContainer profile `rigorous-levels-multiport`. No alias for the old
+names: nothing was published under them. The entries below keep the names they had when they were written.
+
 Four limits of 0.2.0 were named by the author on 2026-11-11 and are closed or narrowed here (measurements in
 README "Measurements" and in the author's report; every number re-measured on this tree, dates and versions stated).
 

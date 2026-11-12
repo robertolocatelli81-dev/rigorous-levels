@@ -3,12 +3,12 @@
 
 Fails (exit 1) with one reason per defect found:
   1. a file in the repository that is not listed, a listed file that is missing, a sha256 different from the listed one;
-  2. an import of a module that is not allowed (allowed: the standard library, the listed modules of src/qraft_ra and of
+  2. an import of a module that is not allowed (allowed: the standard library, the listed modules of src/rigorous_levels and of
      the tests, and a closed list of third-party packages);
   3. a string matching a deny-list of generic rules (home-directory paths, hidden folders under ~, e-mail addresses,
      tailnet host names and addresses);
   4. a secret found by gitleaks (gitleaks missing = error, not a skip);
-  5. a numerical claim of README.md whose published value is not in the README any more (src/qraft_ra/reproduce.py
+  5. a numerical claim of README.md whose published value is not in the README any more (src/rigorous_levels/reproduce.py
      --readme, loaded by path: a number edited by hand in the README fails here).
 --positive-control copies the repository to a temporary folder, checks that the untouched copy passes and that each of
 seven alterations (import of a module that is not allowed, unlisted file, deleted listed file, home-directory path, hidden
@@ -36,7 +36,7 @@ TERZE_PARTI = {"numpy", "scipy", "flint", "mpmath", "scqubits", "sympy",
                "diatomic", "SQcircuit", "pyEPR", "centrex_tlf", "transmon_charge_basis", "transmon_CPB_analytic"}
 # modules absent from the repository, imported only inside a try that treats their absence as an error (failed, not skipped)
 ASSENTI_DICHIARATI = set()
-RADICE_PACCHETTO = "qraft_ra"
+RADICE_PACCHETTO = "rigorous_levels"
 SRC = "src/"
 REGOLE = [  # split in two pieces so that this file does not match itself
     ("percorso_di_casa", re.compile("/ho" + r"me/[A-Za-z0-9_.-]+")),
@@ -83,7 +83,7 @@ def leggi_elenco(radice, difetti):
 def moduli_ammessi(radice, voci):
     """nudi: names of the test modules outside src/; qualificati: modules and packages of src/; nomi_pacchetto: for each
     package, the names assigned or re-exported (from … import) at the top level of its __init__.py (for
-    "from qraft_ra import __version__, Rotor")."""
+    "from rigorous_levels import __version__, Rotor")."""
     nudi, qualificati, nomi_pacchetto = set(), set(), {}
     for p in voci:
         if not p.endswith(".py"):
@@ -177,14 +177,14 @@ def gitleaks(radice, difetti):
 
 
 def readme_claims(radice, difetti):
-    """src/qraft_ra/reproduce.py (loaded by path, no dependency needed) lists the published values: each one must
+    """src/rigorous_levels/reproduce.py (loaded by path, no dependency needed) lists the published values: each one must
     appear verbatim in README.md."""
     import importlib.util
-    percorso = os.path.join(radice, "src", "qraft_ra", "reproduce.py")
+    percorso = os.path.join(radice, "src", "rigorous_levels", "reproduce.py")
     if not os.path.isfile(percorso):
-        difetti.append("reproduce_missing src/qraft_ra/reproduce.py")
+        difetti.append("reproduce_missing src/rigorous_levels/reproduce.py")
         return
-    spec = importlib.util.spec_from_file_location("qraft_ra_reproduce_check", percorso)
+    spec = importlib.util.spec_from_file_location("rigorous_levels_reproduce_check", percorso)
     mod = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(mod)
@@ -283,16 +283,16 @@ def controllo_positivo(radice):
     finto = "ghp_" + "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(36))
     casi = [
         ("untouched", lambda d: None, None),
-        ("import of a module that is not allowed", lambda d: aggiungi(d, "src/qraft_ra/__init__.py", "\nimport requests\n"),
+        ("import of a module that is not allowed", lambda d: aggiungi(d, "src/rigorous_levels/__init__.py", "\nimport requests\n"),
          "import_not_allowed"),
-        ("unlisted file", lambda d: aggiungi(d, "src/qraft_ra/extraneous.py", "X = 1\n"), "file_not_listed"),
+        ("unlisted file", lambda d: aggiungi(d, "src/rigorous_levels/extraneous.py", "X = 1\n"), "file_not_listed"),
         ("home-directory path", lambda d: aggiungi(d, "README.md", "\n/ho" + "me/alice/project\n"), "deny_list"),
         ("hidden folder under ~", lambda d: aggiungi(d, "README.md", "\n~/" + ".config/x\n"), "deny_list"),
         ("edited file, then --update", lambda d: (aggiungi(d, "README.md", "\nedited\n"), aggiorna(d)), None),
         ("listed file deleted, still in the git index",
          lambda d: (indicizza(d), os.remove(os.path.join(d, "tests", "test_readme_example.py"))), "listed_file_missing"),
         ("files added and deleted, then --update",
-         lambda d: (indicizza(d), aggiungi(d, "src/qraft_ra/extraneous.py", "X = 1\n"),
+         lambda d: (indicizza(d), aggiungi(d, "src/rigorous_levels/extraneous.py", "X = 1\n"),
                     os.remove(os.path.join(d, "tests", "test_readme_example.py")), aggiorna(d)), None),
         ("fake secret", lambda d: aggiungi(d, "README.md", f'\ngithub_token = "{finto}"\n'), "secret"),
         ("README number edited by hand", lambda d: sostituisci(d, "README.md", "3.788378597 3.788378597", "3.788378598 3.788378597"),

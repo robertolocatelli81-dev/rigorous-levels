@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/duffing_vs_transmon.py — GUARANTEED per-level error of the Duffing model against the full transmon.
+"""rigorous_levels/duffing_vs_transmon.py — GUARANTEED per-level error of the Duffing model against the full transmon.
 
 The dynamics stacks (qutip-qip circuitqed.py:84-120, dynamiqs benchmarks/systems.py:58-82) use
 H_D = ω a†a + (α/2) a†a†aa; its levels are exact and diagonal in Fock: E^D_j = ω j + (α/2) j (j − 1). The full
-transmon H = 4E_C(n − n_g)² − E_J cos φ has levels E_j enclosed by the intervals of qraft_ra/guaranteed_intervals.py.
+transmon H = 4E_C(n − n_g)² − E_J cos φ has levels E_j enclosed by the intervals of rigorous_levels/guaranteed_intervals.py.
 Here:
   variant "spectrum": ω = E_1 − E_0 and α = (E_2 − E_1) − (E_1 − E_0) taken from the GUARANTEED intervals (by
                       construction δ_0 = δ_1 = δ_2 = 0): δ_j = (E_j − E_0) − E^D_j for j ≥ 3 as an exact interval;
   variant "koch":     ω = √(8 E_J E_C) − E_C and α = −E_C (Koch et al. 2007, eq. 2.11-2.12, first order): δ_j for
                       j ≥ 1, with √(8E_JE_C) enclosed in an Arb ball converted to a rational interval.
 Closed inputs (OutOfDomain with the reason). Measured on 200 transmons of the device regime (2026-11-11): |δ_3| ≥ 1 MHz
-in 200 of 200 (median 34 MHz). QRAFT-RA is an internal model, not an external validator."""
+in 200 of 200 (median 34 MHz). This package is not an external validator."""
 from __future__ import annotations
 
 import math
@@ -19,9 +19,9 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Optional, Tuple
 
-from qraft_ra._compat import add_field_aliases, deprecated_function
-from qraft_ra.guaranteed_intervals import Intervals, OutOfDomain, _flint, guaranteed_levels
-from qraft_ra.rotor_spectrum import Rotor
+from rigorous_levels._compat import add_field_aliases, deprecated_function
+from rigorous_levels.guaranteed_intervals import Intervals, OutOfDomain, _flint, guaranteed_levels
+from rigorous_levels.rotor_spectrum import Rotor
 
 __all__ = ["DuffingError", "duffing_error", "duffing_levels", "OutOfDomain"]
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/fluxonium.py — fluxonium levels as GUARANTEED intervals [low, high] in the oscillator (Fock) basis.
+"""rigorous_levels/fluxonium.py — fluxonium levels as GUARANTEED intervals [low, high] in the oscillator (Fock) basis.
 
     H = 4 E_C n² + (E_L/2) φ² − E_J cos(φ − φ_ext),    φ_ext = 2π·flux   (flux in units of Φ₀; energies in GHz)
 
@@ -27,7 +27,7 @@ N grows (×1.5) until the width target holds, up to N_LIMIT (dense LDLᵀ in pur
 per count: seconds at N ≈ 100, declared). `Intervals.alpha` carries max_o c_o (the outer lowering), `N` the inner cut.
 
 What it does NOT say: that this one-mode H describes a device (no array modes, no quasiparticles, no charge noise).
-QRAFT-RA is an internal model, not an external validator."""
+This package is not an external validator."""
 from __future__ import annotations
 
 import math
@@ -38,9 +38,9 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from qraft_ra._deterministic import dense_lowest
-from qraft_ra.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint, _refuse_overflow
-from qraft_ra.hyperfine_molecule import _count_below_banded
+from rigorous_levels._deterministic import dense_lowest
+from rigorous_levels.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint, _refuse_overflow
+from rigorous_levels.hyperfine_molecule import _count_below_banded
 
 __all__ = ["Fluxonium", "guaranteed_fluxonium_levels", "cos_matrix", "OutOfDomain", "ArbMissing", "DeadlineExceeded"]
 

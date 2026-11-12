@@ -13,7 +13,7 @@ import numpy as np
 
 FLINT = importlib.util.find_spec("flint") is not None
 if FLINT:
-    from qraft_ra import Rotor, guaranteed_levels  # noqa: E402
+    from rigorous_levels import Rotor, guaranteed_levels  # noqa: E402
 
 CASES = ((1.0, 2.0), (0.5, 20.0), (2.0, -15.0), (0.25, 60.0))     # (h2, c2): E_C = h2/4, cosines {4: c2}
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""Test di qraft_ra/hyperfine_molecule.py (10/11/2026). PREREG e misure: note dell'autore (non pubblicate).
+"""Test di rigorous_levels/hyperfine_molecule.py (10/11/2026). PREREG e misure: note dell'autore (non pubblicate).
 Ogni chiamata port deadline: un mutante che fa girare il ciclo a vuoto deve FALLIRE, non bloccare il banco."""
 import importlib.util
 import unittest
@@ -12,8 +12,8 @@ import numpy as np
 FLINT = importlib.util.find_spec("flint") is not None
 DIATOMIC = importlib.util.find_spec("diatomic") is not None
 if FLINT:
-    from qraft_ra import hyperfine_molecule as MI  # noqa: E402
-    from qraft_ra import spherical_rotor as RS  # noqa: E402
+    from rigorous_levels import hyperfine_molecule as MI  # noqa: E402
+    from rigorous_levels import spherical_rotor as RS  # noqa: E402
 
 # Gregory et al. 2016 (PRA 94, 041403(R)), costanti loro, in Hz
 GREG = dict(B=490173.994e3, D=213.0, c1=29.4, c2=196.8, c3=192.4, c4=19.019e3, eQq1=-809.29e3, eQq2=59.98e3)

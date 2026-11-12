@@ -2,7 +2,7 @@
 # Copyright 2026 Roberto Locatelli
 """Mathieu characteristic values with a guaranteed order (where scipy ≤ 1.18.1 returns another order) and the
 fluxonium of Zhang et al. 2021 (PRX 11, 011010) at half flux."""
-from qraft_ra import Fluxonium, guaranteed_fluxonium_levels, mathieu_a, mathieu_b
+from rigorous_levels import Fluxonium, guaranteed_fluxonium_levels, mathieu_a, mathieu_b
 
 v = mathieu_a(11, 299.0)
 print("a_11(299):", v.state, v.strings, "K =", v.K)         # scipy 1.17.1 and 1.18.1 give 232.195… here

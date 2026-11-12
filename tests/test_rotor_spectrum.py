@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""Tests of qraft_ra.rotor_spectrum: closed input grammar and the convergence state.
+"""Tests of rigorous_levels.rotor_spectrum: closed input grammar and the convergence state.
 
 The grammar of the rotor, tested directly: a malformed Rotor, k or tol must end in InputRejected, never in a
 number or in another exception.
@@ -12,8 +12,8 @@ from unittest import mock
 
 import numpy as np
 
-from qraft_ra import rotor_spectrum as RS
-from qraft_ra.rotor_spectrum import NOT_CONVERGED, OK, InputRejected, Rotor, spectrum
+from rigorous_levels import rotor_spectrum as RS
+from rigorous_levels.rotor_spectrum import NOT_CONVERGED, OK, InputRejected, Rotor, spectrum
 
 CATTIVI_NUMERO = [math.nan, math.inf, -math.inf, True, False, None, "1.0", [1.0], {}, 1 + 0j, np.nan, np.float64(np.inf)]
 CATTIVE_ARMONICHE = [0, -1, 1.0, 1.5, True, "1", None, np.float64(2.0)]

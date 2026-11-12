@@ -18,7 +18,7 @@ import time
 
 import numpy as np
 
-from qraft_ra import Rotor, RotorBall, guaranteed_levels, guaranteed_levels_over_box
+from rigorous_levels import Rotor, RotorBall, guaranteed_levels, guaranteed_levels_over_box
 
 K, S, REL = 6, 5, 0.01
 

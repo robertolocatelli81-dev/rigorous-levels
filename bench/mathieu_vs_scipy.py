@@ -4,7 +4,7 @@
 
 Two steps, so that the comparison can run in a venv that has only scipy (e.g. a scipy nightly):
 
-    python bench/mathieu_vs_scipy.py intervals OUT.json        # needs qraft_ra: r = 0…12, q = −400…400 step 0.5
+    python bench/mathieu_vs_scipy.py intervals OUT.json        # needs rigorous_levels: r = 0…12, q = −400…400 step 0.5
     python bench/mathieu_vs_scipy.py intervals OUT.json 0.05   # the fine grid of qiskit-metal #1252: step 0.05, 400 025 values
     python bench/mathieu_vs_scipy.py compare OUT.json          # needs scipy only: counts the values of this scipy
                                                                # outside the interval widened by 1e-9·max(1, |a|)
@@ -22,7 +22,7 @@ TOL_REL = 1e-9
 
 
 def intervals(out, step=STEP):
-    from qraft_ra import mathieu as M
+    from rigorous_levels import mathieu as M
     rows, times = [], []
     nq = int(round(2 * Q_MAX / step)) + 1
     for i in range(nq):

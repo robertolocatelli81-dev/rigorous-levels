@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/reproduce.py — re-measure the numerical claims of README.md, offline, from a clean install:
+"""rigorous_levels/reproduce.py — re-measure the numerical claims of README.md, offline, from a clean install:
 
-    python -m qraft_ra.reproduce             # the fast claims (target < 60 s): one line [PASS]/[FAIL] per claim with
+    python -m rigorous_levels.reproduce             # the fast claims (target < 60 s): one line [PASS]/[FAIL] per claim with
                                              # the measured value and the published one; exit 0 iff every line is PASS
-    python -m qraft_ra.reproduce --full      # also the claims that take minutes (the 200-case benches of bench/)
-    python -m qraft_ra.reproduce --sabotage  # positive control: a solver is deliberately altered, at least one FAIL
-    python -m qraft_ra.reproduce --readme    # no computation: every published value must appear verbatim in README.md
+    python -m rigorous_levels.reproduce --full      # also the claims that take minutes (the 200-case benches of bench/)
+    python -m rigorous_levels.reproduce --sabotage  # positive control: a solver is deliberately altered, at least one FAIL
+    python -m rigorous_levels.reproduce --readme    # no computation: every published value must appear verbatim in README.md
                                              # (check_tree.py runs this: a number edited by hand fails the check)
-    python -m qraft_ra.reproduce --hash      # sha256 of a fixed set of guaranteed intervals (exact strings): the
+    python -m rigorous_levels.reproduce --hash      # sha256 of a fixed set of guaranteed intervals (exact strings): the
                                              # determinism check across interpreters and platforms (CI prints it)
 
 Each claim carries the README sentence fragment it reproduces (`published`), so that the README and this file cannot
@@ -47,7 +47,7 @@ def _flint():
 def _example():
     if not _flint():
         return None
-    from qraft_ra import Rotor, guaranteed_levels
+    from rigorous_levels import Rotor, guaranteed_levels
     iv = guaranteed_levels(Rotor.transmon(0.2, 10.0, n_g=0.3), 4)
     lo, hi = iv.transition(0, 1)
     s = f"{iv.state} {float(lo):.9f} {float(hi):.9f}"
@@ -58,7 +58,7 @@ def _example():
 def _example_scq():
     if importlib.util.find_spec("scqubits") is None:
         return None
-    from qraft_ra import Rotor, scqubits_spectrum
+    from rigorous_levels import Rotor, scqubits_spectrum
     w = scqubits_spectrum(Rotor.transmon(1.0, 2e4), 6, 30, check="doubling")
     return w.state == "NOT_CONVERGED", w.state
 
@@ -67,7 +67,7 @@ def _example_scq():
 def _a01():
     if not _flint():
         return None
-    from qraft_ra import mathieu_a
+    from rigorous_levels import mathieu_a
     v = mathieu_a(0, 1.0)
     return abs(float(v.low) + 0.45513860) < 5e-9 and v.max_width < 1e-12, f"{v.strings} width {v.max_width:.1e}"
 
@@ -76,7 +76,7 @@ def _a01():
 def _a11():
     if not _flint():
         return None
-    from qraft_ra import mathieu_a
+    from rigorous_levels import mathieu_a
     v = mathieu_a(11, 299.0)
     ok = v.strings[0].startswith("123.9949") and v.state == "GUARANTEED"
     try:
@@ -96,7 +96,7 @@ def _grid():
         return None
     import scipy
     from scipy.special import mathieu_a, mathieu_b
-    from qraft_ra import mathieu_value
+    from rigorous_levels import mathieu_value
     wide = wrong = total = 0
     for i in range(1601):
         q = -400.0 + 0.5 * i
@@ -120,7 +120,7 @@ def _grid():
 def _zhang():
     if not _flint():
         return None
-    from qraft_ra import Fluxonium, guaranteed_fluxonium_levels
+    from rigorous_levels import Fluxonium, guaranteed_fluxonium_levels
     iv = guaranteed_fluxonium_levels(Fluxonium(E_C=0.479, E_J=3.395, E_L=0.132, flux=0.5), 3, 1e-9)
     lo, hi = (float(x) * 1e3 for x in iv.transition(0, 1))
     return iv.state == "GUARANTEED" and f"{lo:.7f}" == "13.8815576" and f"{hi:.7f}" == "13.8815586" and iv.N == 117, \
@@ -132,7 +132,7 @@ def _zhang():
 def _moskalenko():
     if not _flint():
         return None
-    from qraft_ra import Fluxonium, guaranteed_fluxonium_levels
+    from rigorous_levels import Fluxonium, guaranteed_fluxonium_levels
     iv = guaranteed_fluxonium_levels(Fluxonium(E_C=0.567, E_J=2.052, E_L=0.835, flux=0.5), 3, 1e-9)
     f01 = float(sum(iv.transition(0, 1)) / 2) * 1e3
     f12 = float(sum(iv.transition(1, 2)) / 2) * 1e3
@@ -143,7 +143,7 @@ def _moskalenko():
 def _box():
     if not _flint():
         return None
-    from qraft_ra import RotorBall, guaranteed_levels_over_box
+    from rigorous_levels import RotorBall, guaranteed_levels_over_box
     iv = guaranteed_levels_over_box(RotorBall.transmon((0.297, 0.303), (14.85, 15.15), n_g=0.25), 4)
     return iv.state == "GUARANTEED" and abs(iv.alpha - 0.15) < 1e-12, f"{iv.state} rho {iv.alpha}"
 
@@ -152,7 +152,7 @@ def _box():
 def _nmat():
     if not _flint():
         return None
-    from qraft_ra import Rotor, guaranteed_matrix_element
+    from rigorous_levels import Rotor, guaranteed_matrix_element
     e = guaranteed_matrix_element(Rotor.transmon(0.3, 15.0, n_g=0.25), 0, 1, "n")
     return f"{abs(e.value):.11f}" == "1.08780085731" and e.max_width < 1e-13, f"{abs(e.value):.11f} width {e.max_width:.1e}"
 
@@ -163,7 +163,7 @@ def _adapter():
     if importlib.util.find_spec("scqubits") is None or not _flint():
         return None
     import numpy as np
-    from qraft_ra import Rotor, scqubits_spectrum, guaranteed_levels
+    from rigorous_levels import Rotor, scqubits_spectrum, guaranteed_levels
     rng = np.random.default_rng(7)
     for _ in range(200):                                   # the generator of bench/readme_numbers.py (wide range)
         rng.uniform(-1, 6)
@@ -192,7 +192,7 @@ def _adapter():
 def _timing():
     if not _flint():
         return None
-    from qraft_ra import Rotor, guaranteed_levels, mathieu_a
+    from rigorous_levels import Rotor, guaranteed_levels, mathieu_a
     t = time.perf_counter()
     guaranteed_levels(Rotor.transmon(0.3, 15.0, n_g=0.25), 6)
     t1 = time.perf_counter() - t
@@ -207,7 +207,7 @@ def determinism_parts() -> List[Tuple[str, List[str]]]:
     """The exact decimal strings of a fixed set of enclosures, one entry per guaranteed module: transmon, sphere,
     Mathieu, fluxonium, parameter box, matrix element ⟨0|n|1⟩, then (added in 0.3.0 with the deterministic estimates)
     a rotor with cos φ and cos 2φ (band path), its ⟨0|cos φ|1⟩, and an RbCs hyperfine sector."""
-    from qraft_ra import (Fluxonium, Rotor, RotorBall, SigmaMolecule, SphericalRotor, guaranteed_fluxonium_levels,
+    from rigorous_levels import (Fluxonium, Rotor, RotorBall, SigmaMolecule, SphericalRotor, guaranteed_fluxonium_levels,
                           guaranteed_levels, guaranteed_levels_over_box, guaranteed_matrix_element,
                           guaranteed_molecule_levels, guaranteed_sphere_levels, mathieu_a, zeeman_hz)
     out: List[Tuple[str, List[str]]] = []
@@ -273,7 +273,7 @@ def main(argv) -> int:
         print(__doc__)
         return 2
     if sabotage:
-        import qraft_ra.mathieu as M
+        import rigorous_levels.mathieu as M
         original = M.sector
         # the NEXT eigenvalue of the right sector (the scipy defect: another order): it changes every a_r and b_r,
         # so the fast set fails too (the old swap a_r -> b_r left r = 0 and every odd r unchanged: 0 FAIL, exit 1)

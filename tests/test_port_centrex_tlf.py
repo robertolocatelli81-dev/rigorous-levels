@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""Test della port centrex_tlf (qraft_ra/port_runner.py) contro la molecola garantita (NEMESIS blocco B, 11/11/2026).
-Richiede bwrap e il venv isolato con centrex-tlf 0.4.0 (QRAFT_BERSAGLI_VENV, default: cartella .venvs/qraft_bersagli nella casa dell'user): altrimenti skip.
+"""Test della port centrex_tlf (rigorous_levels/port_runner.py) contro la molecola garantita (NEMESIS blocco B, 11/11/2026).
+Richiede bwrap e il venv isolato con centrex-tlf 0.4.0 (RIGOROUS_LEVELS_TARGETS_VENV, default: cartella .venvs/rigorous_levels_targets nella casa dell'user): altrimenti skip.
 Mappa delle convenzioni (identità di operatori, non adattamento): c3_nostro = 5·c3_CeNTREX; Debye = 1e-21/c C·m (CODATA esatto)."""
 import glob
 import os
@@ -11,8 +11,8 @@ import subprocess
 import unittest
 
 
-from qraft_ra import hyperfine_molecule as MI  # noqa: E402
-from qraft_ra import multiport as MP  # noqa: E402
+from rigorous_levels import hyperfine_molecule as MI  # noqa: E402
+from rigorous_levels import multiport as MP  # noqa: E402
 
 
 def _bwrap_funziona():
@@ -28,11 +28,11 @@ def _bwrap_funziona():
 
 
 # casa REALE dal database utenti: con HOME temporanea (obbligatoria nei banchi) expanduser("~") salterebbe i test in silenzio
-VENV = os.environ.get("QRAFT_BERSAGLI_VENV", os.path.join(pwd.getpwuid(os.getuid()).pw_dir, ".venvs", "qraft_bersagli"))
+VENV = os.environ.get("RIGOROUS_LEVELS_TARGETS_VENV", os.path.join(pwd.getpwuid(os.getuid()).pw_dir, ".venvs", "rigorous_levels_targets"))
 PY = os.path.join(VENV, "bin", "python")
 SP = tuple(p for p in glob.glob(os.path.join(VENV, "lib", "python3*", "site-packages"))
            if os.path.isdir(os.path.join(p, "centrex_tlf")))
-PRONTO = _bwrap_funziona() and os.path.exists(PY) and len(SP) == 1 and os.environ.get("QRAFT_BERSAGLI_VENV") is not None
+PRONTO = _bwrap_funziona() and os.path.exists(PY) and len(SP) == 1 and os.environ.get("RIGOROUS_LEVELS_TARGETS_VENV") is not None
 
 # XConstants di centrex-tlf 0.4.0
 B0, D0 = 6689.8736e6 - 45.0843e6 / 2 + 0.0942e6 / 4, 5.84e3

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""Tests of qraft_ra/fluxonium.py (PREREG D2 of 0.3.0, 2026-11-11): the exact oscillator at E_J = 0, scqubits inside
+"""Tests of rigorous_levels/fluxonium.py (PREREG D2 of 0.3.0, 2026-11-11): the exact oscillator at E_J = 0, scqubits inside
 the intervals at a large cutoff and OUTSIDE at a small one (negative control), the cosine matrix against numpy
 (a different construction), closed inputs, deadline."""
 import importlib.util
@@ -11,7 +11,7 @@ from fractions import Fraction
 FLINT = importlib.util.find_spec("flint") is not None
 SCQUBITS = importlib.util.find_spec("scqubits") is not None
 if FLINT:
-    from qraft_ra import fluxonium as F  # noqa: E402
+    from rigorous_levels import fluxonium as F  # noqa: E402
 
 DEVICES = (("Zhang 2021", 0.479, 3.395, 0.132), ("Moskalenko 2022 A", 0.567, 2.052, 0.835))
 

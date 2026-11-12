@@ -1,6 +1,6 @@
 cff-version: 1.2.0
-message: "If you use qraft-ra, cite it as below. Nothing here is a third-party or accredited certification: a guaranteed interval follows from the proof in docs/PROOF.md and from the correctness of Arb/FLINT."
-title: "qraft-ra: guaranteed eigenvalue intervals for the charge-basis rotor, the spherical rotor, the 1Σ molecule, the Mathieu characteristic values and the fluxonium, with a sandboxed multiport for external solvers"
+message: "If you use rigorous-levels, cite it as below. Nothing here is a third-party or accredited certification: a guaranteed interval follows from the proof in docs/PROOF.md and from the correctness of Arb/FLINT."
+title: "rigorous-levels: guaranteed eigenvalue intervals for the charge-basis rotor, the spherical rotor, the 1Σ molecule, the Mathieu characteristic values and the fluxonium, with a sandboxed multiport for external solvers"
 type: software
 version: 0.3.0
 date-released: "2026-11-11"
@@ -8,7 +8,7 @@ license: Apache-2.0
 authors:
   - family-names: Locatelli
     given-names: Roberto
-repository-code: "https://github.com/robertolocatelli81-dev/qraft-ra"
+repository-code: "https://github.com/robertolocatelli81-dev/rigorous-levels"
 abstract: "Mathematically guaranteed intervals [low, high] containing the exact eigenvalues of the written Hamiltonian, with the truncation of the basis included in the proof (Rayleigh–Ritz above; Young's inequality and Gershgorin bounds on the truncated block below; eigenvalue counts by Sylvester's law of inertia in Arb ball arithmetic). A convergence warning for scqubits with a declared threshold rule, a multiport that runs other people's solvers in a fail-closed isolation engine and compares them with the intervals, and the guaranteed per-level error of the Duffing model."
 keywords:
   - verified numerics

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""Tests of qraft_ra.guaranteed_intervals.
+"""Tests of rigorous_levels.guaranteed_intervals.
 
 They need python-flint; without it only the absence tests run. Independent reference: mpmath at 50 digits, implicit
 QL (tridiag_eigen) on the matrix truncated to a larger basis. Identifiers and messages are in Italian, as in the code.
@@ -15,8 +15,8 @@ from unittest import mock
 
 import numpy as np
 
-from qraft_ra import guaranteed_intervals as IG
-from qraft_ra.rotor_spectrum import Rotor, spectrum
+from rigorous_levels import guaranteed_intervals as IG
+from rigorous_levels.rotor_spectrum import Rotor, spectrum
 
 FLINT = importlib.util.find_spec("flint") is not None
 MPMATH = importlib.util.find_spec("mpmath") is not None

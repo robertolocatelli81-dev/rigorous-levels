@@ -25,9 +25,9 @@ import numpy as np
 import scqubits as sq
 from mpmath.matrices.eigen_symmetric import tridiag_eigen
 
-from qraft_ra import guaranteed_intervals as IG
-from qraft_ra import scqubits_adapter as SA
-from qraft_ra.rotor_spectrum import OK, Rotor, spectrum
+from rigorous_levels import guaranteed_intervals as IG
+from rigorous_levels import scqubits_adapter as SA
+from rigorous_levels.rotor_spectrum import OK, Rotor, spectrum
 
 sq.settings.PROGRESSBAR_DISABLED = True
 K = 6

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""Test di qraft_ra/scqubits_adapter.py, rule "scq-threshold/1.0" (11/11/2026). Specifica e PREREG in
+"""Test di rigorous_levels/scqubits_adapter.py, rule "scq-threshold/1.0" (11/11/2026). Specifica e PREREG in
 note dell'autore (non pubblicate). Ogni test deve poter fallire: controlli positivi sulla formula e sui rami."""
 import importlib.util
 import shutil
@@ -10,8 +10,8 @@ import unittest
 import numpy as np
 
 
-from qraft_ra import scqubits_adapter as A  # noqa: E402
-from qraft_ra.rotor_spectrum import Rotor  # noqa: E402
+from rigorous_levels import scqubits_adapter as A  # noqa: E402
+from rigorous_levels.rotor_spectrum import Rotor  # noqa: E402
 
 SCQ = importlib.util.find_spec("scqubits") is not None
 FLINT = importlib.util.find_spec("flint") is not None
@@ -155,7 +155,7 @@ class TestConScqubits(unittest.TestCase):
 
     def test_sandbox_uscita_non_ok(self):
         """Se la port risponde ERROR/INVALID l'adattatore non dà numeri (mutante vivo: check tolto)."""
-        from qraft_ra import multiport as MP
+        from rigorous_levels import multiport as MP
         orig = MP.run_port
         MP.run_port = lambda r: MP.Output(r.port, "", (), r.unit, "ERROR", "finto", 0.0, "")
         try:
@@ -166,7 +166,7 @@ class TestConScqubits(unittest.TestCase):
 
     def test_sandbox_unita_diversa_rifiutata(self):
         """NEMESIS 11/11: una port che risponde in MHz a una request in GHz non dà numeri (prima: energies ×1e3, OK)."""
-        from qraft_ra import multiport as MP
+        from rigorous_levels import multiport as MP
         orig = MP.run_port
         MP.run_port = lambda r: MP.Output(r.port, "x", tuple(1e3 * i for i in range(r.levels)), "MHz", "OK", "", 0.0, "")
         try:
@@ -233,7 +233,7 @@ class TestConScqubits(unittest.TestCase):
             self.assertEqual(s.energies, p.energies)
             self.assertEqual((s.state, s.threshold_origin, s.error, s.threshold), (p.state, p.threshold_origin, p.error, p.threshold))
             self.assertIn("sandbox", s.engine)
-        from qraft_ra import isolation
+        from rigorous_levels import isolation
         orig, probes = isolation.shutil.which, dict(isolation._PROBES)
         isolation.shutil.which = lambda name: None          # every engine's executable missing: no number
         isolation._PROBES.clear()

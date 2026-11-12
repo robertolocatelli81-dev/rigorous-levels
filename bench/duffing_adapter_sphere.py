@@ -11,7 +11,7 @@ repository on 2026-11-10/11 and is re-run here):
   sphere    the spherical rotor: for 60 random (B, dE, M) the guaranteed intervals against numpy at a cut 40 larger
             than the one used (claim: inside in every case).
 
-    python bench/duffing_adapter_sphere.py OUT.json        # needs qraft_ra[scqubits] for the adapter row; ~3 min
+    python bench/duffing_adapter_sphere.py OUT.json        # needs rigorous_levels[scqubits] for the adapter row; ~3 min
 """
 import json
 import statistics
@@ -20,8 +20,8 @@ import time
 
 import numpy as np
 
-from qraft_ra import Rotor, SphericalRotor, duffing_error, guaranteed_levels, guaranteed_sphere_levels
-from qraft_ra.spherical_rotor import _c2
+from rigorous_levels import Rotor, SphericalRotor, duffing_error, guaranteed_levels, guaranteed_sphere_levels
+from rigorous_levels.spherical_rotor import _c2
 
 
 def device_regime():
@@ -47,7 +47,7 @@ def duffing(cases):
 
 def adapter(cases):
     try:
-        from qraft_ra import scqubits_spectrum
+        from rigorous_levels import scqubits_spectrum
         import scqubits  # noqa: F401
     except ImportError:
         return {"skipped": "scqubits absent"}

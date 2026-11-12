@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra._deterministic — float estimates of eigenvalues and eigenvectors that are the same on every machine.
+"""rigorous_levels._deterministic — float estimates of eigenvalues and eigenvectors that are the same on every machine.
 
 The guaranteed modules use float estimates only to choose where the exact (Arb) counts are taken, but the ends of a
 published interval are built from those points: an estimate that changes with the CPU or the BLAS/LAPACK kernel

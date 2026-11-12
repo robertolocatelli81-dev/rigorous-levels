@@ -60,7 +60,7 @@ jobs:
           case "${{ matrix.stack }}" in default) ;; unlimited) ulimit -s unlimited ;; *) ulimit -s ${{ matrix.stack }} ;; esac
           ulimit -s
           cd tests
-          python -c 'import qraft_ra; assert "site-packages" in qraft_ra.__file__, qraft_ra.__file__; print(qraft_ra.__file__)'
+          python -c 'import rigorous_levels; assert "site-packages" in rigorous_levels.__file__, rigorous_levels.__file__; print(rigorous_levels.__file__)'
           python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_readme_example test_spherical_rotor test_hyperfine_molecule test_inputs_review test_duffing_vs_transmon test_multiport test_port_centrex_tlf test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases test_spec_bounds test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           for e in bwrap podman docker; do grep -qE "^test_s1_rete_bloccata \\(test_multiport\\.TestSandbox_$e(\\.test_s1_rete_bloccata)?\\) \\.\\.\\. ok" ../unittest.log || { echo "engine $e: the S1 test did not run"; exit 1; }; done
@@ -70,9 +70,9 @@ jobs:
           python -W error::DeprecationWarning -B -m unittest test_guaranteed_intervals test_rotor_spectrum test_mathieu
       - name: Re-measure the README claims offline (fast set), the sabotage positive control, the determinism hash, and unittest discover
         run: |
-          python -m qraft_ra.reproduce
-          python -m qraft_ra.reproduce --sabotage
-          echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (python ${{ matrix.python }}, stack ${{ matrix.stack }})"
+          python -m rigorous_levels.reproduce
+          python -m rigorous_levels.reproduce --sabotage
+          echo "determinism hash: $(python -m rigorous_levels.reproduce --hash) (python ${{ matrix.python }}, stack ${{ matrix.stack }})"
           python -B -m unittest discover -s tests -t tests -p "test_*.py" > "$RUNNER_TEMP/discover.log" 2>&1 || { tail -40 "$RUNNER_TEMP/discover.log"; exit 1; }
           echo "unittest discover: OK"
 
@@ -106,7 +106,7 @@ jobs:
           python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_spherical_rotor test_hyperfine_molecule test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_generative_inputs test_spec_bounds test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           for e in bwrap docker; do grep -qE "^test_s1_rete_bloccata \\(test_multiport\\.TestSandbox_$e(\\.test_s1_rete_bloccata)?\\) \\.\\.\\. ok" ../unittest.log || { echo "engine $e: the S1 test did not run"; exit 1; }; done
-          cd .. && python -m qraft_ra.reproduce && echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (linux-arm, python ${{ matrix.python }})"
+          cd .. && python -m rigorous_levels.reproduce && echo "determinism hash: $(python -m rigorous_levels.reproduce --hash) (linux-arm, python ${{ matrix.python }})"
 
   # ── macOS (ARM64 runner): everything that is not a sandbox, plus the sandbox-exec engine (S1–S7) ──
   macos:
@@ -159,7 +159,7 @@ jobs:
           python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_spherical_rotor test_hyperfine_molecule test_duffing_vs_transmon test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases test_spec_bounds test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           grep -qE "^test_s1_rete_bloccata \\(test_multiport\\.TestSandbox_sandbox_exec(\\.test_s1_rete_bloccata)?\\) \\.\\.\\. ok" ../unittest.log || { echo "sandbox-exec: the S1 test did not run"; exit 1; }
-          cd .. && python -m qraft_ra.reproduce && echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (macos, python ${{ matrix.python }})"
+          cd .. && python -m rigorous_levels.reproduce && echo "determinism hash: $(python -m rigorous_levels.reproduce --hash) (macos, python ${{ matrix.python }})"
 
   # ── Windows: everything that is not a sandbox, plus the AppContainer + Job Object engine (S1–S7) ──
   windows:
@@ -182,10 +182,10 @@ jobs:
           python -m pip install --no-deps .
           python - <<'PY'
           import os, subprocess, sys, tempfile
-          from qraft_ra import isolation as I
+          from rigorous_levels import isolation as I
           ctypes, wt = I._win()
-          sid, s = I._appcontainer_sid(ctypes, wt, "qraft-ra-multiport")
-          d = tempfile.mkdtemp(prefix="qraft_measure_")
+          sid, s = I._appcontainer_sid(ctypes, wt, "rigorous-levels-multiport")
+          d = tempfile.mkdtemp(prefix="rigorous_levels_measure_")
           I._icacls(d, s, "M")
           for p in (sys.base_prefix, sys.prefix):
               I._icacls(p, s, "RX")
@@ -218,7 +218,7 @@ jobs:
           python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_spherical_rotor test_hyperfine_molecule test_duffing_vs_transmon test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases test_spec_bounds test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           grep -qE "^test_s1_rete_bloccata \\(test_multiport\\.TestSandbox_appcontainer(\\.test_s1_rete_bloccata)?\\) \\.\\.\\. ok" ../unittest.log || { echo "appcontainer: the S1 test did not run"; exit 1; }
-          cd .. && python -m qraft_ra.reproduce && echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (windows, python ${{ matrix.python }})"
+          cd .. && python -m rigorous_levels.reproduce && echo "determinism hash: $(python -m rigorous_levels.reproduce --hash) (windows, python ${{ matrix.python }})"
 
   # ── Free-threaded Python 3.14t: the pure-math modules (python-flint publishes cp314t wheels? measured here: the job
   #    reports which dependencies have wheels and skips the modules whose dependency is missing) ──
@@ -241,4 +241,4 @@ jobs:
           cd tests
           python -B -m unittest -v test_rotor_spectrum test_guaranteed_intervals test_spherical_rotor test_mathieu test_fluxonium test_generative_inputs test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
-          cd .. && if python -c "import flint" 2>/dev/null; then echo "determinism hash: $(python -m qraft_ra.reproduce --hash) (free-threaded 3.14t, python-flint $(python -c 'import flint; print(flint.__version__)'))"; else echo "determinism hash: not computed (python-flint has no wheel here)"; fi
+          cd .. && if python -c "import flint" 2>/dev/null; then echo "determinism hash: $(python -m rigorous_levels.reproduce --hash) (free-threaded 3.14t, python-flint $(python -c 'import flint; print(flint.__version__)'))"; else echo "determinism hash: not computed (python-flint has no wheel here)"; fi

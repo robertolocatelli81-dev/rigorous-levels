@@ -20,7 +20,7 @@ class TestAliases(unittest.TestCase):
         return mod
 
     def test_rotor_and_spectrum(self):
-        from qraft_ra import rotore_spettro
+        from rigorous_levels import rotore_spettro
         RS = self._reload(rotore_spettro)
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -37,7 +37,7 @@ class TestAliases(unittest.TestCase):
 
     @unittest.skipUnless(FLINT, "python-flint absent")
     def test_intervals_sphere_molecule_duffing(self):
-        from qraft_ra import intervallo_garantito, molecola_iperfine_garantita, rotore_sferico_garantito, rotore_spettro
+        from rigorous_levels import intervallo_garantito, molecola_iperfine_garantita, rotore_sferico_garantito, rotore_spettro
         IG = self._reload(intervallo_garantito)
         RS = self._reload(rotore_spettro)
         SR = self._reload(rotore_sferico_garantito)
@@ -62,7 +62,7 @@ class TestAliases(unittest.TestCase):
         self.assertTrue(all(issubclass(x.category, DeprecationWarning) for x in w), [x.category for x in w])
 
     def test_multiport_and_adapter_names(self):
-        from qraft_ra import multiporta, scqubits_adattatore
+        from rigorous_levels import multiporta, scqubits_adattatore
         MP = self._reload(multiporta)
         SA = self._reload(scqubits_adattatore)
         with warnings.catch_warnings(record=True) as w:
@@ -73,14 +73,14 @@ class TestAliases(unittest.TestCase):
             self.assertEqual(r.port, "numpy_rotor")
             u = MP.Uscita("numpy_rotor", "v", (1.0, 2.0, 3.0), "GHz", "OK", "", 0.0, "")
             self.assertEqual(u.stato, "OK")
-            self.assertEqual(MP.CONTRATTO, "qraft-port/0.3")
+            self.assertEqual(MP.CONTRATTO, "rigorous-levels-port/0.3")
             self.assertEqual(SA.REGOLA, "scq-threshold/1.0")
             self.assertEqual(SA.NON_CONVERGENTE, "NOT_CONVERGED")
             self.assertEqual(SA.disponibile()["present"], SA.available()["present"])
         self.assertTrue(all(issubclass(x.category, DeprecationWarning) for x in w))
 
     def test_english_api_is_warning_free(self):
-        from qraft_ra import multiport, rotor_spectrum
+        from rigorous_levels import multiport, rotor_spectrum
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
             r = rotor_spectrum.Rotor.transmon(0.3, 15.0, n_g=0.25)

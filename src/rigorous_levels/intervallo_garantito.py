@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra.intervallo_garantito — DEPRECATED alias of qraft_ra.guaranteed_intervals (the Italian names of 0.2.0).
+"""rigorous_levels.intervallo_garantito — DEPRECATED alias of rigorous_levels.guaranteed_intervals (the Italian names of 0.2.0).
 
 Importing this module and using any name from it emits a DeprecationWarning that names the English replacement.
 Keyword arguments keep their 0.2.0 names here and are translated; the fields of the results have Italian aliases on
 the English classes. States are the English constants of 0.3.0 (GARANTITO is "GUARANTEED"). Removed in a later release."""
-from qraft_ra import guaranteed_intervals as _new
-from qraft_ra._compat import _warn, deprecated_class, deprecated_function, deprecated_module  # noqa: F401
+from rigorous_levels import guaranteed_intervals as _new
+from rigorous_levels._compat import _warn, deprecated_class, deprecated_function, deprecated_module  # noqa: F401
 
-from qraft_ra.guaranteed_intervals import (K_MAX, M_MAX, PREC_MAX, PREC_MIN, ArbMissing, DeadlineExceeded, Intervals,
+from rigorous_levels.guaranteed_intervals import (K_MAX, M_MAX, PREC_MAX, PREC_MIN, ArbMissing, DeadlineExceeded, Intervals,
                                            OutOfDomain, as_strings, check_domain, guaranteed_levels)
 
 N_LIMITE, CIFRE = _new.N_LIMIT, _new.DIGITS

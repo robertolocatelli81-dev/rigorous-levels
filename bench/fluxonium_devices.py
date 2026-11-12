@@ -2,7 +2,7 @@
 # Copyright 2026 Roberto Locatelli
 """Guaranteed fluxonium levels for published devices against scqubits.Fluxonium (PREREG D2.4 of 0.3.0).
 
-    python bench/fluxonium_devices.py OUT.json        # needs qraft_ra[scqubits]
+    python bench/fluxonium_devices.py OUT.json        # needs rigorous_levels[scqubits]
 
 Parameters as printed in the papers (GHz; read on 2026-11-11 through ar5iv renderings, not from the PDFs):
   Zhang et al., PRX 11, 011010 (2021), arXiv:2002.10653: E_C = 0.479, E_L = 0.132, E_J = 3.395; f01 = 14 MHz at Φ₀/2.
@@ -19,7 +19,7 @@ import time
 
 import scqubits as sq
 
-from qraft_ra import fluxonium as F
+from rigorous_levels import fluxonium as F
 
 sq.settings.PROGRESSBAR_DISABLED = True
 DEVICES = [

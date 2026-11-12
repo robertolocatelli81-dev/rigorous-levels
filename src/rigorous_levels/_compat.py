@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra._compat — the Italian names of 0.2.0 as DEPRECATED aliases of the English API of 0.3.0.
+"""rigorous_levels._compat — the Italian names of 0.2.0 as DEPRECATED aliases of the English API of 0.3.0.
 
 Every use of an old name (module, class, function, keyword argument, field) emits a DeprecationWarning that names the
 new one, so a migration can be measured (`python -W error::DeprecationWarning` fails on any old name). The aliases are
-removed in a later release; nothing new should use them. Modules: `qraft_ra.intervallo_garantito`,
+removed in a later release; nothing new should use them. Modules: `rigorous_levels.intervallo_garantito`,
 `rotore_spettro`, `scqubits_adattatore`, `rotore_sferico_garantito`, `molecola_iperfine_garantita`, `multiporta`.
 """
 from __future__ import annotations
@@ -15,12 +15,12 @@ from typing import Dict, Optional
 
 
 def _warn(old: str, new: str) -> None:
-    warnings.warn(f"{old} is deprecated since qraft-ra 0.3.0: use {new}", DeprecationWarning, stacklevel=3)
+    warnings.warn(f"{old} is deprecated since rigorous-levels 0.3.0: use {new}", DeprecationWarning, stacklevel=3)
 
 
 def deprecated_module(old: str, new: str) -> None:
     """Called at import time by an old-named module."""
-    warnings.warn(f"qraft_ra.{old} is deprecated since qraft-ra 0.3.0: use qraft_ra.{new}", DeprecationWarning,
+    warnings.warn(f"rigorous_levels.{old} is deprecated since rigorous-levels 0.3.0: use rigorous_levels.{new}", DeprecationWarning,
                   stacklevel=3)
 
 
@@ -53,7 +53,7 @@ def add_field_aliases(cls: type, aliases: Dict[str, str]) -> None:
     """Italian field names as read-only properties that warn and return the English field."""
     for old, new in aliases.items():
         def getter(self, _old=old, _new=new):
-            warnings.warn(f"{cls.__name__}.{_old} is deprecated since qraft-ra 0.3.0: use .{_new}", DeprecationWarning,
+            warnings.warn(f"{cls.__name__}.{_old} is deprecated since rigorous-levels 0.3.0: use .{_new}", DeprecationWarning,
                           stacklevel=2)
             return getattr(self, _new)
         setattr(cls, old, property(getter))

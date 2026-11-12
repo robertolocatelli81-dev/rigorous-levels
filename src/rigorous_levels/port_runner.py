@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/port_runner.py — runner of the PORTS of the multiport: it runs INSIDE the sandbox (bwrap, podman, docker),
-never in the process of QRAFT-RA. Reads <folder>/request.json, runs the port (closed list), writes <folder>/output.json.
-Specification: docs/PORT_CONTRACT.md (contract "qraft-port/0.3"; §8: `requests.json` → `outputs.json` for a batch
+"""rigorous_levels/port_runner.py — runner of the PORTS of the multiport: it runs INSIDE the sandbox (bwrap, podman, docker),
+never in the process of rigorous-levels. Reads <folder>/request.json, runs the port (closed list), writes <folder>/output.json.
+Specification: docs/PORT_CONTRACT.md (contract "rigorous-levels-port/0.3"; §8: `requests.json` → `outputs.json` for a batch
 in one process).
 The `test_*` ports exist ONLY for the positive controls of the sandbox (network, writes, time, memory, dirty output,
 wrong solver, hostile behaviour). None of them is a solver.
-This file imports nothing from QRAFT-RA: it is self-contained (numpy and the solvers come from the declared
+This file imports nothing from rigorous-levels: it is self-contained (numpy and the solvers come from the declared
 site-packages)."""
 import json
 import math
@@ -24,39 +24,39 @@ try:
 except ImportError:                 # pragma: no cover
     socket = None
 
-CONTRACT = "qraft-port/0.3"
+CONTRACT = "rigorous-levels-port/0.3"
 H_PLANCK = 6.62607015e-34
 
 
 def _output_dir(folder: str) -> str:
-    """Where output.json goes: the work folder (bwrap, containers bind the file there) or QRAFT_OUTPUT_DIR (engines
+    """Where output.json goes: the work folder (bwrap, containers bind the file there) or RIGOROUS_LEVELS_OUTPUT_DIR (engines
     that cannot bind a single file into a read-only folder: sandbox-exec, appcontainer, wasm)."""
-    return os.environ.get("QRAFT_OUTPUT_DIR") or folder
+    return os.environ.get("RIGOROUS_LEVELS_OUTPUT_DIR") or folder
 
 
 RLIMITS_CLOSED = ("cpu", "memory", "file_size", "processes")   # the limits the runner sets (docs/PORT_CONTRACT.md §6)
 
 
 def _host_limits() -> set:
-    """QRAFT_HOST_LIMITS: the limits the ENGINE enforces from the host (closed list RLIMITS_CLOSED, comma-separated);
+    """RIGOROUS_LEVELS_HOST_LIMITS: the limits the ENGINE enforces from the host (closed list RLIMITS_CLOSED, comma-separated);
     an unknown name is refused, never ignored."""
-    names = {x for x in os.environ.get("QRAFT_HOST_LIMITS", "").split(",") if x}
+    names = {x for x in os.environ.get("RIGOROUS_LEVELS_HOST_LIMITS", "").split(",") if x}
     unknown = names - set(RLIMITS_CLOSED)
     if unknown:
-        raise RuntimeError(f"QRAFT_HOST_LIMITS: unknown limit(s) {sorted(unknown)}")
+        raise RuntimeError(f"RIGOROUS_LEVELS_HOST_LIMITS: unknown limit(s) {sorted(unknown)}")
     return names
 
 
 def _rlimit(seconds: int, mem_mib: int) -> None:
     """Sets each rlimit on its own, never above the hard limit already in force (a lower one is stronger). A limit the
     platform refuses (macOS: RLIMIT_AS, "current limit exceeds maximum limit", CI 2026-11-12) is skipped ONLY if the
-    engine enforces it from the host (QRAFT_HOST_LIMITS); otherwise the run stops with the limit named."""
+    engine enforces it from the host (RIGOROUS_LEVELS_HOST_LIMITS); otherwise the run stops with the limit named."""
     if resource is None:
         return
     host = _host_limits()
     wanted = [("cpu", "RLIMIT_CPU", seconds), ("memory", "RLIMIT_AS", mem_mib * 1024 * 1024),
               ("file_size", "RLIMIT_FSIZE", 64 * 1024 * 1024)]
-    if os.environ.get("QRAFT_NPROC") != "cgroup":    # docker: the pids cgroup of the container is the cap
+    if os.environ.get("RIGOROUS_LEVELS_NPROC") != "cgroup":    # docker: the pids cgroup of the container is the cap
         wanted.append(("processes", "RLIMIT_NPROC", 16))
     for name, attr, value in wanted:
         which = getattr(resource, attr, None)
@@ -86,10 +86,10 @@ def _where(path: str) -> str:
 
 
 def _devnull() -> None:
-    """QRAFT_DEVNULL (appcontainer only): the container cannot open the NUL device (CI 2026-11-12: dill, imported by
+    """RIGOROUS_LEVELS_DEVNULL (appcontainer only): the container cannot open the NUL device (CI 2026-11-12: dill, imported by
     scqubits, failed with "Permission denied: 'nul'"), so os.devnull points at an empty file in the scratch folder,
     counted by the engine's disk cap. Used only if NUL itself cannot be opened."""
-    alt = os.environ.get("QRAFT_DEVNULL")
+    alt = os.environ.get("RIGOROUS_LEVELS_DEVNULL")
     if not alt:
         return
     try:
@@ -204,7 +204,7 @@ def port_test_network(r):
 def port_test_write(r):
     """Tries to write in HOME and at the given path, and to see the user's real home: reports what succeeded."""
     results = []
-    for p in (os.path.join(os.environ.get("HOME", "/nonexistent"), "qraft_port_test.txt"), r["truncation"]["path"]):
+    for p in (os.path.join(os.environ.get("HOME", "/nonexistent"), "rigorous_levels_port_test.txt"), r["truncation"]["path"]):
         try:
             with open(p, "w", encoding="utf-8") as f:
                 f.write("test")

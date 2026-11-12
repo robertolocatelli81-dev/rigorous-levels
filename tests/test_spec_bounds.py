@@ -11,11 +11,11 @@ from fractions import Fraction
 FLINT = importlib.util.find_spec("flint") is not None
 if FLINT:
     import numpy as np  # noqa: E402
-    from qraft_ra import fluxonium as FX  # noqa: E402
-    from qraft_ra import mathieu as MA  # noqa: E402
-    from qraft_ra import matrix_elements as ME  # noqa: E402
-    from qraft_ra.guaranteed_intervals import _flint  # noqa: E402
-    from qraft_ra.rotor_spectrum import Rotor  # noqa: E402
+    from rigorous_levels import fluxonium as FX  # noqa: E402
+    from rigorous_levels import mathieu as MA  # noqa: E402
+    from rigorous_levels import matrix_elements as ME  # noqa: E402
+    from rigorous_levels.guaranteed_intervals import _flint  # noqa: E402
+    from rigorous_levels.rotor_spectrum import Rotor  # noqa: E402
 
 
 @unittest.skipUnless(FLINT, "python-flint absent")

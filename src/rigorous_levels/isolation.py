@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""qraft_ra/isolation.py — the ISOLATION ENGINES of the multiport (docs/PORT_CONTRACT.md §6), one closed contract:
+"""rigorous_levels/isolation.py — the ISOLATION ENGINES of the multiport (docs/PORT_CONTRACT.md §6), one closed contract:
 
     run(engine, work, out_path, seconds, site_packages, python) -> (return code | None, timed_out, description)
 
@@ -34,7 +34,7 @@ import tempfile
 import time
 from typing import Dict, List, Optional, Tuple
 
-from qraft_ra.guaranteed_intervals import OutOfDomain
+from rigorous_levels.guaranteed_intervals import OutOfDomain
 
 ENGINE_ORDER = ("podman", "docker", "bwrap", "sandbox-exec", "appcontainer", "wasm")   # strongest usable first
 ENGINES = ("auto",) + ENGINE_ORDER
@@ -247,19 +247,19 @@ def run_watched(cmd: List[str], timeout: float, stderr_path: str, env: Dict[str,
 
 # ── bwrap (Linux) ──────────────────────────────────────────────────────────────────────────────────────────────────
 def _vouched_paths() -> List[str]:
-    """QRAFT_TRUSTED_ENGINES: exact real paths, os.pathsep-separated, compared as strings with the binary's real path:
+    """RIGOROUS_LEVELS_TRUSTED_ENGINES: exact real paths, os.pathsep-separated, compared as strings with the binary's real path:
     an entry that is relative, a symlink, has '..', a trailing '/' or spaces around it vouches for nothing."""
-    return [x for x in os.environ.get("QRAFT_TRUSTED_ENGINES", "").split(os.pathsep) if x]
+    return [x for x in os.environ.get("RIGOROUS_LEVELS_TRUSTED_ENGINES", "").split(os.pathsep) if x]
 
 
-_VOUCHED: Dict[str, str] = {}      # engine name -> real path of a user-owned binary accepted by QRAFT_TRUSTED_ENGINES
+_VOUCHED: Dict[str, str] = {}      # engine name -> real path of a user-owned binary accepted by RIGOROUS_LEVELS_TRUSTED_ENGINES
 
 
 def _trusted_exe(name: str, exe: str) -> str:
     """The REAL path of the engine executable, which must not be replaceable by this user: on POSIX a regular file
     owned by root, not writable by group or others, in folders (from / down) owned by root and not writable by group
     or others (otherwise the file could be swapped after this check: the path returned is the one executed). A
-    user-owned binary is accepted only if its exact real path is listed in QRAFT_TRUSTED_ENGINES; it is then named in
+    user-owned binary is accepted only if its exact real path is listed in RIGOROUS_LEVELS_TRUSTED_ENGINES; it is then named in
     Output.sandbox, because this user's processes can replace it (the probe, measured from inside, can be forged).
     Windows has no owner uid here: not checked."""
     if os.name != "posix":
@@ -273,7 +273,7 @@ def _trusted_exe(name: str, exe: str) -> str:
     if st.st_uid != 0:
         if real not in _vouched_paths():
             raise SandboxMissing(f"{name} {exe!r} is not owned by root or is writable by others: no execution "
-                                 f"(fail-closed; list its exact real path {real!r} in QRAFT_TRUSTED_ENGINES to vouch for it)")
+                                 f"(fail-closed; list its exact real path {real!r} in RIGOROUS_LEVELS_TRUSTED_ENGINES to vouch for it)")
         _VOUCHED[name] = real
         return real
     d = os.path.dirname(real)
@@ -412,7 +412,7 @@ def _container_cmd(engine: str, exe: str, image: str, name: str, seconds: int, m
         # rootful docker runs the port with the host uid in the host user namespace: RLIMIT_NPROC there counts every
         # process and thread of that user on the host (CI 2026-11-12: "can't start new thread" with 16), so the
         # process cap is the container's own pids cgroup and the runner does not set RLIMIT_NPROC
-        cmd += ["--pids-limit", str(CONTAINER_PIDS), "--env", "QRAFT_NPROC=cgroup"]
+        cmd += ["--pids-limit", str(CONTAINER_PIDS), "--env", "RIGOROUS_LEVELS_NPROC=cgroup"]
     for m in mounts_ro:
         cmd += ["-v", f"{m}:{m}:ro"]
     cmd += ["-v", f"{work}:/work:ro", "-v", f"{out_path}:/work/output.json:rw", image]
@@ -433,7 +433,7 @@ try:
 except OSError:
     ifaces = None
 try:
-    open('/usr/qraft_probe', 'w').close(); root_ro = False
+    open('/usr/rigorous_levels_probe', 'w').close(); root_ro = False
 except OSError:
     root_ro = True
 print(json.dumps({'ifaces': ifaces, 'uid': os.getuid() if hasattr(os, 'getuid') else None, 'root_ro': root_ro,
@@ -448,13 +448,13 @@ def _probe_container(engine: str, image: str) -> Dict[str, object]:
     if r.returncode != 0:
         raise SandboxMissing(f"{engine}: image {image!r} is not in the local store (it is never pulled here): "
                              f"{r.stderr.decode('utf-8', 'replace').strip()[-200:]}")
-    work = tempfile.mkdtemp(prefix="qraft_probe_")
+    work = tempfile.mkdtemp(prefix="rigorous_levels_probe_")
     try:
         with open(os.path.join(work, "probe.py"), "w", encoding="utf-8") as f:
             f.write(PROBE_CODE)
         out = os.path.join(work, "output.json")
         open(out, "wb").close()
-        name = "qraft_probe_" + secrets.token_hex(6)
+        name = "rigorous_levels_probe_" + secrets.token_hex(6)
         cmd = _container_cmd(engine, exe, image, name, 60, [], work, out)
         cmd += ["python3", "-I", "-S", "-B", "-c", "import runpy, sys; sys.stdout = open('/work/output.json', 'w'); "
                 "runpy.run_path('/work/probe.py'); sys.stdout.close()"]
@@ -484,7 +484,7 @@ def check_container_facts(engine: str, facts: Dict[str, object]) -> None:
 def _run_container(engine: str, image: str, work: str, out_path: str, seconds: int, site_packages: List[str],
                    stderr_path: str):
     facts = probe(engine, image)
-    name = "qraft_port_" + secrets.token_hex(6)
+    name = "rigorous_levels_port_" + secrets.token_hex(6)
     # the host timeout (seconds + 5) fires first and kills the container by name; the engine's own timeout is a
     # backstop for a hung client
     cmd = _container_cmd(engine, facts["exe"], image, name, seconds + 15, site_packages, work, out_path)
@@ -542,14 +542,14 @@ def seatbelt_profile(python: str, readable: List[str], out_path: str, scratch: s
 
 def _probe_sandbox_exec() -> Dict[str, object]:
     exe = _sandbox_exec()
-    scratch = tempfile.mkdtemp(prefix="qraft_sb_")
+    scratch = tempfile.mkdtemp(prefix="rigorous_levels_sb_")
     try:
         probe = os.path.join(scratch, "probe.py")
         with open(probe, "w", encoding="utf-8") as f:
             f.write("import os, socket, sys, json\n"
                     "try:\n    socket.create_connection(('127.0.0.1', 9), timeout=1); net = 'open'\n"
                     "except OSError as e:\n    net = type(e).__name__\n"
-                    "try:\n    open('/usr/qraft_probe', 'w').close(); root_ro = False\nexcept OSError:\n    root_ro = True\n"
+                    "try:\n    open('/usr/rigorous_levels_probe', 'w').close(); root_ro = False\nexcept OSError:\n    root_ro = True\n"
                     # listing the home needs file-read-data, which the profile denies there; os.path.isdir needs
                     # only file-read-metadata, allowed everywhere (CI 2026-11-12: isdir gave True, a false alarm)
                     "try:\n    os.listdir(sys.argv[1]); home = True\nexcept OSError:\n    home = False\n"
@@ -585,14 +585,14 @@ def _run_sandbox_exec(work: str, out_path: str, seconds: int, mem_mib: int, site
                       stderr_path: str):
     exe = probe("sandbox-exec")["exe"]
     python = os.path.realpath(python or sys.executable)
-    scratch = tempfile.mkdtemp(prefix="qraft_sb_")
+    scratch = tempfile.mkdtemp(prefix="rigorous_levels_sb_")
     try:
         prof = seatbelt_profile(python, [sys.base_prefix, os.path.dirname(os.path.dirname(python)), work, *site_packages],
                                 out_path, scratch)
         pf = os.path.join(scratch, "profile.sb")
         with open(pf, "w", encoding="utf-8") as f:
             f.write(prof)
-        env = dict(SANDBOX_ENV, TMPDIR=scratch, QRAFT_OUTPUT_DIR=os.path.dirname(out_path), QRAFT_HOST_LIMITS="memory")
+        env = dict(SANDBOX_ENV, TMPDIR=scratch, RIGOROUS_LEVELS_OUTPUT_DIR=os.path.dirname(out_path), RIGOROUS_LEVELS_HOST_LIMITS="memory")
         cmd = [exe, "-f", pf, python, "-I", "-S", "-B", os.path.join(work, RUNNER_NAME), work]
         rc, timed_out, limit = run_watched(cmd, seconds + 5, stderr_path, env, int(mem_mib) << 20,
                                            [scratch, out_path])
@@ -615,7 +615,7 @@ def _appcontainer_sid(ctypes, wintypes, name: str):
     """SID of the AppContainer profile `name` (created if missing). learn.microsoft.com: CreateAppContainerProfile."""
     userenv = ctypes.WinDLL("userenv", use_last_error=True)
     sid = ctypes.c_void_p()
-    hr = userenv.CreateAppContainerProfile(name, name, "qraft-ra multiport sandbox", None, 0, ctypes.byref(sid))
+    hr = userenv.CreateAppContainerProfile(name, name, "rigorous-levels multiport sandbox", None, 0, ctypes.byref(sid))
     if hr != 0:
         if hr & 0xFFFFFFFF == 0x800700B7:        # ERROR_ALREADY_EXISTS
             hr = userenv.DeriveAppContainerSidFromAppContainerName(name, ctypes.byref(sid))
@@ -796,8 +796,8 @@ def _appcontainer_base_env(scratch: str) -> Dict[str, str]:
 
 def _probe_appcontainer() -> Dict[str, object]:
     ctypes, wintypes = _win()
-    sid, sid_str = _appcontainer_sid(ctypes, wintypes, "qraft-ra-multiport")
-    scratch = tempfile.mkdtemp(prefix="qraft_ac_")
+    sid, sid_str = _appcontainer_sid(ctypes, wintypes, "rigorous-levels-multiport")
+    scratch = tempfile.mkdtemp(prefix="rigorous_levels_ac_")
     try:
         for p in (sys.base_prefix, sys.prefix):
             _refuse_home_or_ancestor(p, "appcontainer")
@@ -809,7 +809,7 @@ def _probe_appcontainer() -> Dict[str, object]:
             f.write("import os, socket, sys, json\n"
                     "try:\n    socket.create_connection(('127.0.0.1', 9), timeout=1); net = 'open'\n"
                     "except OSError as e:\n    net = type(e).__name__\n"
-                    "try:\n    open(os.path.join(os.environ['SYSTEMROOT'], 'qraft_probe'), 'w').close(); root_ro = False\n"
+                    "try:\n    open(os.path.join(os.environ['SYSTEMROOT'], 'rigorous_levels_probe'), 'w').close(); root_ro = False\n"
                     "except OSError:\n    root_ro = True\n"
                     "try:\n    os.listdir(sys.argv[1]); home = True\nexcept OSError:\n    home = False\n"
                     "open(sys.argv[2], 'w').write(json.dumps({'net': net, 'root_ro': root_ro, 'home': home}))\n")
@@ -840,19 +840,19 @@ def _run_appcontainer(work: str, out_path: str, seconds: int, mem_mib: int, site
                       stderr_path: str):
     ctypes, wintypes = _win()
     facts = probe("appcontainer")
-    sid, sid_str = _appcontainer_sid(ctypes, wintypes, "qraft-ra-multiport")
+    sid, sid_str = _appcontainer_sid(ctypes, wintypes, "rigorous-levels-multiport")
     python = os.path.realpath(python or sys.executable)
     for p in [os.path.dirname(os.path.dirname(python)), *site_packages, work]:
         _refuse_home_or_ancestor(p, "appcontainer")
         _icacls(p, sid_str, "RX")
     _icacls(out_path, sid_str, OUTPUT_GRANT)
-    scratch = tempfile.mkdtemp(prefix="qraft_ac_")
+    scratch = tempfile.mkdtemp(prefix="rigorous_levels_ac_")
     _icacls(scratch, sid_str, "M")
     try:
         env = {**_appcontainer_base_env(scratch), "HOME": os.path.join(scratch, "nohome"),
                "TEMP": scratch, "TMP": scratch, "PYTHONDONTWRITEBYTECODE": "1", "OMP_NUM_THREADS": "1",
-               "OPENBLAS_NUM_THREADS": "1", "QRAFT_OUTPUT_DIR": os.path.dirname(out_path),
-               "QRAFT_DEVNULL": os.path.join(scratch, "devnull")}
+               "OPENBLAS_NUM_THREADS": "1", "RIGOROUS_LEVELS_OUTPUT_DIR": os.path.dirname(out_path),
+               "RIGOROUS_LEVELS_DEVNULL": os.path.join(scratch, "devnull")}
         cmdline = subprocess.list2cmdline([python, "-I", "-S", "-B", os.path.join(work, RUNNER_NAME), work])
         rc, timed_out, limit = _run_appcontainer_process(ctypes, wintypes, sid, cmdline, env, scratch, seconds, mem_mib,
                                                          stderr_path, [scratch, out_path, facts["folder"]])
@@ -865,19 +865,19 @@ def _run_appcontainer(work: str, out_path: str, seconds: int, mem_mib: int, site
 
 # ── WebAssembly (wasmtime + CPython for WASI) ─────────────────────────────────────────────────────────────────────
 def _wasm_parts() -> Tuple[str, str]:
-    """(wasmtime executable, folder with python.wasm and lib/) from PATH and QRAFT_PYTHON_WASM: never downloaded."""
+    """(wasmtime executable, folder with python.wasm and lib/) from PATH and RIGOROUS_LEVELS_PYTHON_WASM: never downloaded."""
     exe = shutil.which("wasmtime")
     if exe is None:
         raise SandboxMissing("wasmtime not found: no execution of external code (fail-closed)")
     exe = _trusted_exe("wasmtime", exe)
-    folder = os.environ.get("QRAFT_PYTHON_WASM", "")
+    folder = os.environ.get("RIGOROUS_LEVELS_PYTHON_WASM", "")
     if not folder or not os.path.isfile(os.path.join(folder, "python.wasm")) or not os.path.isdir(os.path.join(folder, "lib")):
-        raise SandboxMissing("QRAFT_PYTHON_WASM must point to a folder with python.wasm and lib/ (a CPython WASI build)")
+        raise SandboxMissing("RIGOROUS_LEVELS_PYTHON_WASM must point to a folder with python.wasm and lib/ (a CPython WASI build)")
     folder = os.path.realpath(folder)
     # wasmtime pre-opens folders read-write (no read-only flag in wasmtime 50): the interpreter folder must be
     # non-writable by this user, so that the guest cannot alter the next run's interpreter (fail-closed otherwise)
     if any(os.access(p, os.W_OK) for p in (folder, os.path.join(folder, "lib"), os.path.join(folder, "python.wasm"))):
-        raise SandboxMissing(f"QRAFT_PYTHON_WASM {folder!r} is writable by this user: make it read-only (chmod -R a-w)")
+        raise SandboxMissing(f"RIGOROUS_LEVELS_PYTHON_WASM {folder!r} is writable by this user: make it read-only (chmod -R a-w)")
     return exe, folder
 
 
@@ -893,13 +893,13 @@ def _wasm_cmd(exe: str, folder: str, dirs: List[Tuple[str, str]], seconds: int, 
 
 def _probe_wasm() -> Dict[str, object]:
     exe, folder = _wasm_parts()
-    scratch = tempfile.mkdtemp(prefix="qraft_wasm_")
+    scratch = tempfile.mkdtemp(prefix="rigorous_levels_wasm_")
     try:
         with open(os.path.join(scratch, "probe.py"), "w", encoding="utf-8") as f:
             f.write("import json, os, sys\n"
                     "try:\n    import socket; socket.create_connection(('127.0.0.1', 9), timeout=1); net = 'open'\n"
                     "except Exception as e:\n    net = type(e).__name__\n"
-                    "try:\n    open('/lib/qraft_probe', 'w').close(); root_ro = False\nexcept OSError:\n    root_ro = True\n"
+                    "try:\n    open('/lib/rigorous_levels_probe', 'w').close(); root_ro = False\nexcept OSError:\n    root_ro = True\n"
                     "try:\n    import numpy; np = numpy.__version__\nexcept Exception as e:\n    np = type(e).__name__\n"
                     "open('/work/out.json', 'w').write(json.dumps({'net': net, 'root_ro': root_ro, 'numpy': np, "
                     "'version': list(sys.version_info[:2])}))\n")
@@ -935,7 +935,7 @@ def _run_wasm(work: str, out_path: str, seconds: int, site_packages: List[str], 
             os.chmod(os.path.join(root, n), 0o444)
     os.chmod(work, 0o555)
     cmd = _wasm_cmd(facts["exe"], facts["folder"], [(work, "/work"), (outdir, "/out")],
-                    seconds, {"HOME": "/nohome", "QRAFT_OUTPUT_DIR": "/out"})
+                    seconds, {"HOME": "/nohome", "RIGOROUS_LEVELS_OUTPUT_DIR": "/out"})
     cmd += ["-I", "-S", "-B", "/work/" + RUNNER_NAME, "/work"]
     try:
         rc, timed_out = _run(cmd, seconds + 5, os.path.join(outdir, "stderr.txt"), {"PATH": os.environ.get("PATH", "")})
@@ -988,13 +988,13 @@ def run(engine: str, work: str, out_path: str, seconds: int, mem_mib: int, site_
         python: Optional[str] = None, image: Optional[str] = None) -> Tuple[Optional[int], bool, str, str]:
     """Runs `<work>/port_runner.py <work>` inside `engine`. Returns (return code or None, timed_out, description,
     limit): `limit` is the reason a cap enforced from the host was exceeded (memory, disk: sandbox-exec, appcontainer),
-    "" otherwise; the description names an engine binary accepted only through QRAFT_TRUSTED_ENGINES."""
+    "" otherwise; the description names an engine binary accepted only through RIGOROUS_LEVELS_TRUSTED_ENGINES."""
     res = _run_engine(engine, work, out_path, seconds, mem_mib, site_packages, python, image)
     rc, timed_out, descr = res[:3]
     limit = res[3] if len(res) > 3 else ""
     vouched = _VOUCHED.get("wasmtime" if engine == "wasm" else engine)
     if vouched:
-        descr += (f"; engine binary {vouched} is user-owned, accepted because QRAFT_TRUSTED_ENGINES lists it "
+        descr += (f"; engine binary {vouched} is user-owned, accepted because RIGOROUS_LEVELS_TRUSTED_ENGINES lists it "
                   f"(processes of this user can replace it)")
     return rc, timed_out, descr, limit
 

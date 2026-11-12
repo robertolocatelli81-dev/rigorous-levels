@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Roberto Locatelli
-"""Tests of qraft_ra/matrix_elements.py: exact symmetry values inside the enclosures, scqubits' matrix elements
+"""Tests of rigorous_levels/matrix_elements.py: exact symmetry values inside the enclosures, scqubits' matrix elements
 inside, a wrong vector gives no bound (negative control), the bound tightens with the residual, closed inputs."""
 import importlib.util
 import unittest
@@ -9,8 +9,8 @@ from fractions import Fraction
 FLINT = importlib.util.find_spec("flint") is not None
 SCQUBITS = importlib.util.find_spec("scqubits") is not None
 if FLINT:
-    from qraft_ra import Rotor  # noqa: E402
-    from qraft_ra import matrix_elements as ME  # noqa: E402
+    from rigorous_levels import Rotor  # noqa: E402
+    from rigorous_levels import matrix_elements as ME  # noqa: E402
 
 
 @unittest.skipUnless(FLINT, "python-flint absent")
@@ -108,7 +108,7 @@ class TestGuarantee(unittest.TestCase):
                 ME.guaranteed_matrix_element(*args, **kw)
 
     def test_deadline(self):
-        from qraft_ra import DeadlineExceeded
+        from rigorous_levels import DeadlineExceeded
         with self.assertRaises(DeadlineExceeded):
             ME.guaranteed_matrix_element(Rotor.transmon(0.01, 50000.0), 0, 1, "n", deadline=1e-6)
 

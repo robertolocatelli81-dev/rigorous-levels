@@ -2,7 +2,7 @@
 # Copyright 2026 Roberto Locatelli
 """Parameters known with an uncertainty: E_C and E_J as intervals, levels guaranteed over the whole box
 (two guaranteed computations, Weyl's inequality and monotonicity in E_C; docs/PROOF.md)."""
-from qraft_ra import Rotor, RotorBall, guaranteed_levels, guaranteed_levels_over_box
+from rigorous_levels import Rotor, RotorBall, guaranteed_levels, guaranteed_levels_over_box
 
 box = RotorBall.transmon((0.297, 0.303), (14.85, 15.15), n_g=0.25)      # E_C ± 1 %, E_J ± 1 % (GHz)
 iv = guaranteed_levels_over_box(box, 4, 1e-10)
