@@ -50,7 +50,7 @@ def verdetto(E, Bg, two_MF, k, Jmax, c3=5 * C3_LORO):
     iv = MI.guaranteed_molecule_levels(nostra(E, Bg, c3), two_MF, k, deadline=300, width=1e-11)
     r = MP.Request("centrex_tlf", {"type": "tlf_centrex", "E_Vcm": E, "B_G": Bg, "Jmax": Jmax, "two_MF": two_MF},
                      k, {}, unit="Hz", seconds=300, mem_mib=4096, site_packages=SP)
-    u = MP.run_port(r, python=PY)
+    u = MP.run_port(r, python=PY, engine="bwrap")
     assert u.state == "OK", u.reason
     return MP.compare(iv, "Hz", u, tolerance=0.5).overall
 
@@ -87,7 +87,7 @@ class TestPortaCentrex(unittest.TestCase):
         iv = MI.guaranteed_molecule_levels(nostra(0.0, 10.0, 5 * C3_LORO), 2, 4, deadline=300, width=1e-11)
         r = MP.Request("centrex_tlf", model(B_G=-10.0, Jmax=4, two_MF=2), 4, {}, unit="Hz", seconds=300,
                          mem_mib=4096, site_packages=SP)
-        self.assertEqual(MP.compare(iv, "Hz", MP.run_port(r, python=PY), tolerance=0.5).overall, "OUTSIDE")
+        self.assertEqual(MP.compare(iv, "Hz", MP.run_port(r, python=PY, engine="bwrap"), tolerance=0.5).overall, "OUTSIDE")
 
 
 if __name__ == "__main__":
