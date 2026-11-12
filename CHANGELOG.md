@@ -221,12 +221,37 @@ green; 5 red. Product defects, each with a test that fails on the tree before it
 - Windows: CreateProcessW in the AppContainer failed with error 203 (ERROR_ENVVAR_NOT_FOUND) on the GitHub runner;
   the environment block is now sorted by name, the error names the variables passed (names only), and the block
   carries the system variables a process needs (SYSTEMDRIVE, WINDIR, COMSPEC, PATHEXT) and LOCALAPPDATA/APPDATA
-  pointed at the scratch folder. Sorting alone did not fix it (CI run 43156458790). Not yet confirmed by a CI run
-  when this entry was written.
+  pointed at the scratch folder. Sorting alone did not fix it (CI run 43156458790); with the system variables the
+  error 203 is gone and the AppContainer probe passes (CI run 43157816967).
 - macOS: the sandbox-exec probe asked `os.path.isdir(home)`, which needs only file metadata, allowed everywhere by
   the profile: a false "does not isolate". It now tries to list the home (file-read-data, denied there).
 - CI: the check that each engine's S1 test ran matched only the test name format of Python 3.11+; on 3.10 it failed
   although the test had passed. It now matches both formats and still refuses a skipped test.
+
+After run 43157816967 (12 of 16 jobs green; macOS and Windows red in the S1–S7 tests of their engine):
+
+- macOS refuses RLIMIT_AS ("ValueError: current limit exceeds maximum limit"), and the runner set all its rlimits in
+  one block: every sandbox-exec run, and the runner outside the sandbox, ended in that error. Each rlimit is now set
+  on its own, never above a lower hard limit already in force; a refused limit stops the run with the limit named
+  unless the engine enforces it from the host (`QRAFT_HOST_LIMITS`, closed list). sandbox-exec enforces memory from
+  the host: a watchdog samples the resident memory of the process group every 20 ms (libproc) and checks the peak
+  after the exit (wait4); over `mem_mib` the run is killed and the output is ERROR "memory: … (host watchdog)".
+- sandbox-exec and appcontainer have no tmpfs, and Windows has no file-size rlimit: the same watchdog caps one file at
+  64 MiB and the writable places at 256 MiB in all, the limits of the other engines (sampled, declared in
+  docs/PORT_CONTRACT.md §6); the whole process group (macOS) or job (Windows) is killed at the end of a run.
+- Windows: the output file was granted `M`, which includes DELETE: the port removed it and `run_port` raised
+  FileNotFoundError. The grant is now `(R,W)`, and a missing output file is INVALID "no output", never an exception.
+  sandbox-exec allowed `file-write*` on the output file (unlink and create too): now `file-write-data` only.
+- Windows: the AppContainer cannot open the NUL device (scqubits → dill: "Permission denied: 'nul'"); the runner points
+  `os.devnull` at an empty file in the scratch folder, only when NUL cannot be opened.
+- The `test_write` port reported the real home "visible" from `os.path.isdir`, which Seatbelt allows everywhere
+  (metadata); it now lists the folder, as the probe does.
+
+Test fixes for these platforms: the runner outside the sandbox (positive controls) gets the Windows system variables
+(WinError 10106 without SYSTEMROOT) and `QRAFT_HOST_LIMITS=memory`; the engine-missing controls make appcontainer
+missing through its Windows API, as it has no executable; the peak-memory check of the stdout test reads
+PeakWorkingSetSize on Windows and bytes (not KiB) on macOS; the disk controls use the runner's `$WORK` and `$TMP` on
+the engines that run on host paths. Not yet confirmed by a CI run when this entry was written.
 
 Test and CI fixes: tests that need `pwd`, a `sh` fake interpreter or `SIGALRM` are POSIX-only or use a thread with a
 time limit; the examples get a fresh `USERPROFILE` on Windows (qutip needs a home); scqubits 4.3.1 is not installed

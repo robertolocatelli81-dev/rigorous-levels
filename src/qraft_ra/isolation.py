@@ -31,6 +31,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Dict, List, Optional, Tuple
 
 from qraft_ra.guaranteed_intervals import OutOfDomain
@@ -50,6 +51,8 @@ CLIENT_ENV = ("PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "XDG_RUNTIME_DIR", "X
 SANDBOX_ENV = {"HOME": "/tmp/nohome", "PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1",
                "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"}
 CONTAINER_PIDS = 16   # docker --pids-limit (processes and threads of the container): the same cap as RLIMIT_NPROC
+FILE_CAP = 64 << 20   # RLIMIT_FSIZE of the runner; checked from the host where the platform has no such rlimit
+WATCH_INTERVAL = 0.02  # seconds between two samples of the host watchdog (sandbox-exec, appcontainer)
 _PROBES: Dict[Tuple[str, str], Dict[str, object]] = {}
 
 
@@ -98,6 +101,140 @@ def _run(cmd: List[str], timeout: float, stderr_path: str, env: Dict[str, str]) 
         return p.returncode, False
     except subprocess.TimeoutExpired:
         return None, True
+
+
+# ── host watchdog (engines without tmpfs or without an address-space rlimit: sandbox-exec, appcontainer) ─────────
+def _tree_usage(paths: List[str]) -> Tuple[int, int]:
+    """(total bytes, largest file) of the files under `paths` (apparent sizes, links not followed). Files unlinked
+    while still open are not seen (declared in docs/PORT_CONTRACT.md §6)."""
+    total = big = 0
+    stack = list(paths)
+    while stack:
+        p = stack.pop()
+        try:
+            st = os.lstat(p)
+        except OSError:
+            continue
+        if stat.S_ISDIR(st.st_mode):
+            try:
+                stack.extend(os.path.join(p, n) for n in os.listdir(p))
+            except OSError:
+                pass
+        elif stat.S_ISREG(st.st_mode):
+            total += st.st_size
+            big = max(big, st.st_size)
+    return total, big
+
+
+def disk_reason(paths: List[str], base: Tuple[int, int] = (0, 0)) -> str:
+    """The reason the writable places exceed the caps of the tmpfs engines (one file over FILE_CAP, all of them over
+    TMPFS_BYTES beyond `base`, what was there before the run), or ""."""
+    total, big = _tree_usage(paths)
+    if big > max(FILE_CAP, base[1]):
+        return f"disk: a file of {big >> 20} MiB over the {FILE_CAP >> 20} MiB cap (host watchdog)"
+    if total - base[0] > TMPFS_BYTES:
+        return f"disk: {(total - base[0]) >> 20} MiB written over the {TMPFS_BYTES >> 20} MiB cap (host watchdog)"
+    return ""
+
+
+def _memory_sampler():
+    """A function pgid -> bytes resident in the process group (max of resident size and physical footprint on macOS,
+    proc_pid_rusage of libproc; VmRSS on Linux), or SandboxMissing if this platform cannot be sampled."""
+    if sys.platform == "darwin":
+        import ctypes
+        import ctypes.util
+        try:
+            lib = ctypes.CDLL(ctypes.util.find_library("proc") or "/usr/lib/libproc.dylib", use_errno=True)
+            lib.proc_pid_rusage, lib.proc_listpgrppids   # noqa: B018 — both must exist
+        except (OSError, AttributeError) as e:
+            raise SandboxMissing(f"memory watchdog: libproc unavailable ({e}): no memory cap, nothing runs") from None
+
+        class RUsageInfoV0(ctypes.Structure):
+            _fields_ = [("uuid", ctypes.c_uint8 * 16)] + [(n, ctypes.c_uint64) for n in (
+                "user_time", "system_time", "pkg_idle_wkups", "interrupt_wkups", "pageins", "wired_size",
+                "resident_size", "phys_footprint", "proc_start_abstime", "proc_exit_abstime")]
+
+        def sample(pgid: int) -> int:
+            buf = (ctypes.c_int * 256)()
+            lib.proc_listpgrppids(pgid, buf, ctypes.sizeof(buf))
+            total = 0
+            for pid in {x for x in buf if x > 0} | {pgid}:
+                ru = RUsageInfoV0()
+                if lib.proc_pid_rusage(pid, 0, ctypes.byref(ru)) == 0:
+                    total += max(ru.resident_size, ru.phys_footprint)
+            return total
+        return sample
+    if sys.platform.startswith("linux"):
+        page = os.sysconf("SC_PAGE_SIZE")
+
+        def sample(pgid: int) -> int:
+            total = 0
+            for n in os.listdir("/proc"):
+                if not n.isdigit():
+                    continue
+                try:
+                    with open(f"/proc/{n}/stat", "rb") as f:
+                        fields = f.read().rsplit(b")", 1)[1].split()
+                    if int(fields[2]) != pgid:
+                        continue
+                    with open(f"/proc/{n}/statm", "rb") as f:
+                        total += int(f.read().split()[1]) * page
+                except (OSError, ValueError, IndexError):
+                    pass
+            return total
+        return sample
+    raise SandboxMissing(f"memory watchdog: no sampler on {sys.platform}")
+
+
+def _kill_group(pgid: int) -> None:
+    try:
+        os.killpg(pgid, 9)
+    except OSError:
+        pass
+
+
+def run_watched(cmd: List[str], timeout: float, stderr_path: str, env: Dict[str, str], mem_bytes: int,
+                disk_paths: List[str]) -> Tuple[Optional[int], bool, str]:
+    """POSIX: runs `cmd` in a new session and samples it every WATCH_INTERVAL s: resident memory of its process group
+    over `mem_bytes` (0 = not watched), or the writable places over the disk caps, kill the whole group; after the exit
+    the peak resident size (wait4) and the disk are checked again, so a short peak or a file left behind is still
+    caught. Returns (return code or None, timed_out, reason of the cap exceeded or "")."""
+    sampler = _memory_sampler() if mem_bytes else None
+    base = _tree_usage(disk_paths)
+    with open(stderr_path, "wb") as ferr:
+        p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=ferr, env=env,
+                             start_new_session=True)
+    deadline = time.monotonic() + timeout
+    reason, timed_out, rc, peak = "", False, None, 0
+    try:
+        while True:
+            pid, status, ru = os.wait4(p.pid, os.WNOHANG)
+            if pid == p.pid:
+                rc = os.waitstatus_to_exitcode(status)
+                p.returncode = rc
+                peak = ru.ru_maxrss * (1 if sys.platform == "darwin" else 1024)
+                break
+            if not reason and not timed_out:
+                if sampler is not None:
+                    used = sampler(p.pid)
+                    if used > mem_bytes:
+                        reason = (f"memory: {used >> 20} MiB resident over the mem_mib cap of {mem_bytes >> 20} MiB "
+                                  f"(host watchdog)")
+                reason = reason or disk_reason(disk_paths, base)
+                if not reason and time.monotonic() > deadline:
+                    timed_out = True
+                if reason or timed_out:
+                    _kill_group(p.pid)
+            time.sleep(WATCH_INTERVAL)
+    finally:
+        _kill_group(p.pid)                       # children left behind (forks) never outlive the run
+        if p.returncode is None:
+            p.kill()
+            p.wait()
+    if not reason and sampler is not None and peak > mem_bytes:
+        reason = f"memory: peak {peak >> 20} MiB resident over the mem_mib cap of {mem_bytes >> 20} MiB (host watchdog)"
+    reason = reason or disk_reason(disk_paths, base)
+    return (None if timed_out else rc), timed_out, reason
 
 
 # ── bwrap (Linux) ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -388,7 +525,8 @@ def seatbelt_profile(python: str, readable: List[str], out_path: str, scratch: s
     for p in readable:                                   # later rules win: the declared pieces inside a home
         _refuse_home_or_ancestor(p, "sandbox-exec")
         lines.append(f"(allow file-read* (subpath {_sb_literal(os.path.realpath(p))}))")
-    lines.append(f"(allow file-write* (literal {_sb_literal(os.path.realpath(out_path))}))")
+    # the output file: its data only (no unlink, no create: a link put in its place would be read by the host)
+    lines.append(f"(allow file-write-data (literal {_sb_literal(os.path.realpath(out_path))}))")
     lines.append(f"(allow file-write* (subpath {_sb_literal(os.path.realpath(scratch))}))")
     lines.append("(deny network*)")
     return "\n".join(lines) + "\n"
@@ -428,11 +566,15 @@ def _probe_sandbox_exec() -> Dict[str, object]:
         raise SandboxMissing(f"sandbox-exec probe failed (rc={p.returncode}): {p.stderr.decode('utf-8', 'replace')[-300:]}")
     if facts.get("net") == "open" or facts.get("root_ro") is not True or facts.get("home") is not False:
         raise SandboxMissing(f"sandbox-exec does not isolate: {facts}")
+    # macOS refuses RLIMIT_AS (CI 2026-11-12): the memory cap is the host watchdog, which must be able to sample
+    if not _memory_sampler()(os.getpgrp()) > 0:
+        raise SandboxMissing("sandbox-exec: the memory watchdog reads 0 bytes for this process: no memory cap")
     facts.update(engine="sandbox-exec", exe=exe)
     return facts
 
 
-def _run_sandbox_exec(work: str, out_path: str, seconds: int, site_packages: List[str], python: str, stderr_path: str):
+def _run_sandbox_exec(work: str, out_path: str, seconds: int, mem_mib: int, site_packages: List[str], python: str,
+                      stderr_path: str):
     exe = probe("sandbox-exec")["exe"]
     python = os.path.realpath(python or sys.executable)
     scratch = tempfile.mkdtemp(prefix="qraft_sb_")
@@ -442,12 +584,14 @@ def _run_sandbox_exec(work: str, out_path: str, seconds: int, site_packages: Lis
         pf = os.path.join(scratch, "profile.sb")
         with open(pf, "w", encoding="utf-8") as f:
             f.write(prof)
-        env = dict(SANDBOX_ENV, TMPDIR=scratch, QRAFT_OUTPUT_DIR=os.path.dirname(out_path))
+        env = dict(SANDBOX_ENV, TMPDIR=scratch, QRAFT_OUTPUT_DIR=os.path.dirname(out_path), QRAFT_HOST_LIMITS="memory")
         cmd = [exe, "-f", pf, python, "-I", "-S", "-B", os.path.join(work, RUNNER_NAME), work]
-        rc, timed_out = _run(cmd, seconds + 5, stderr_path, env)
+        rc, timed_out, limit = run_watched(cmd, seconds + 5, stderr_path, env, int(mem_mib) << 20,
+                                           [scratch, out_path])
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-    return rc, timed_out, "sandbox-exec deny-default profile: no network, read-only except output, homes hidden"
+    return (rc, timed_out, "sandbox-exec deny-default profile: no network, read-only except output, homes hidden; "
+            "memory and scratch disk capped by the host watchdog", limit)
 
 
 # ── AppContainer + Job Object (Windows) ───────────────────────────────────────────────────────────────────────────
@@ -486,8 +630,27 @@ def _icacls(path: str, sid_str: str, rights: str) -> None:
         raise SandboxMissing(f"appcontainer: icacls on {path!r} failed: {r.stderr.decode('utf-8', 'replace')[-200:]}")
 
 
+OUTPUT_GRANT = "(R,W)"   # appcontainer: read and write the output file's data; no DELETE (M would let it be replaced)
+
+
+def _appcontainer_folder(ctypes, wintypes, sid_str: str) -> str:
+    """The AppContainer's own profile folder (GetAppContainerFolderPath): writable by the container and kept between
+    runs, so its growth is counted by the disk cap. SandboxMissing if it cannot be located."""
+    userenv = ctypes.WinDLL("userenv", use_last_error=True)
+    ole = ctypes.WinDLL("ole32")
+    path = wintypes.LPWSTR()
+    hr = userenv.GetAppContainerFolderPath(sid_str, ctypes.byref(path))
+    if hr != 0 or not path.value:
+        raise SandboxMissing(f"appcontainer: its folder cannot be located (HRESULT 0x{hr & 0xFFFFFFFF:08X}): "
+                             f"its writes could not be capped")
+    value = path.value
+    ole.CoTaskMemFree(path)
+    return value
+
+
 def _run_appcontainer_process(ctypes, wintypes, sid, cmdline: str, env: Dict[str, str], cwd: str, seconds: int,
-                              mem_mib: int, stderr_path: str) -> Tuple[Optional[int], bool]:
+                              mem_mib: int, stderr_path: str,
+                              disk_paths: Optional[List[str]] = None) -> Tuple[Optional[int], bool, str]:
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     INVALID = wintypes.HANDLE(-1).value
 
@@ -573,17 +736,27 @@ def _run_appcontainer_process(ctypes, wintypes, sid, cmdline: str, env: Dict[str
             or not k32.AssignProcessToJobObject(job, pi.hProcess):
         k32.TerminateProcess(pi.hProcess, 1)
         raise SandboxMissing(f"appcontainer: job object limits not applied ({ctypes.get_last_error()})")
+    disk_paths = list(disk_paths or [])
+    base = _tree_usage(disk_paths)
     k32.ResumeThread(pi.hThread)
     WAIT_TIMEOUT = 0x102
-    w = k32.WaitForSingleObject(pi.hProcess, int((seconds + 5) * 1000))
-    timed_out = w == WAIT_TIMEOUT
-    if timed_out:
-        k32.TerminateJobObject(job, 1)
+    deadline = time.monotonic() + seconds + 5
+    timed_out, reason = False, ""
+    while k32.WaitForSingleObject(pi.hProcess, int(WATCH_INTERVAL * 1000)) == WAIT_TIMEOUT:
+        # no RLIMIT_FSIZE and no tmpfs on Windows: the Job Object has no disk limit, the host watches the writable places
+        reason = disk_reason(disk_paths, base)
+        timed_out = not reason and time.monotonic() > deadline
+        if reason or timed_out:
+            k32.TerminateJobObject(job, 1)
+            k32.WaitForSingleObject(pi.hProcess, 10_000)
+            break
     code = wintypes.DWORD()
     k32.GetExitCodeProcess(pi.hProcess, ctypes.byref(code))
+    k32.TerminateJobObject(job, 1)                  # processes the runner started never outlive it
     for h in (pi.hThread, pi.hProcess, job):
         k32.CloseHandle(h)
-    return (None if timed_out else int(code.value)), timed_out
+    reason = reason or disk_reason(disk_paths, base)
+    return (None if timed_out else int(code.value)), timed_out, reason
 
 
 def _appcontainer_base_env(scratch: str) -> Dict[str, str]:
@@ -624,8 +797,8 @@ def _probe_appcontainer() -> Dict[str, object]:
         env = {**_appcontainer_base_env(scratch), "HOME": os.path.join(scratch, "nohome"),
                "TEMP": scratch, "TMP": scratch, "PYTHONDONTWRITEBYTECODE": "1"}
         cmdline = subprocess.list2cmdline([sys.executable, "-I", "-S", "-B", probe, home, out])
-        rc, timed_out = _run_appcontainer_process(ctypes, wintypes, sid, cmdline, env, scratch, 60, 1024,
-                                                  os.path.join(scratch, "stderr.txt"))
+        rc, timed_out, _ = _run_appcontainer_process(ctypes, wintypes, sid, cmdline, env, scratch, 60, 1024,
+                                                     os.path.join(scratch, "stderr.txt"))
         with open(os.path.join(scratch, "stderr.txt"), "rb") as f:
             tail = f.read()[-400:].decode("utf-8", "replace")
         try:
@@ -639,7 +812,7 @@ def _probe_appcontainer() -> Dict[str, object]:
         raise SandboxMissing(f"appcontainer probe failed (rc={rc}, timed_out={timed_out}): {tail}")
     if facts.get("net") == "open" or facts.get("root_ro") is not True or facts.get("home") is not False:
         raise SandboxMissing(f"appcontainer does not isolate: {facts}")
-    facts.update(engine="appcontainer", sid=sid_str)
+    facts.update(engine="appcontainer", sid=sid_str, folder=_appcontainer_folder(ctypes, wintypes, sid_str))
     return facts
 
 
@@ -652,19 +825,22 @@ def _run_appcontainer(work: str, out_path: str, seconds: int, mem_mib: int, site
     for p in [os.path.dirname(os.path.dirname(python)), *site_packages, work]:
         _refuse_home_or_ancestor(p, "appcontainer")
         _icacls(p, sid_str, "RX")
-    _icacls(out_path, sid_str, "M")
+    _icacls(out_path, sid_str, OUTPUT_GRANT)
     scratch = tempfile.mkdtemp(prefix="qraft_ac_")
     _icacls(scratch, sid_str, "M")
     try:
         env = {**_appcontainer_base_env(scratch), "HOME": os.path.join(scratch, "nohome"),
                "TEMP": scratch, "TMP": scratch, "PYTHONDONTWRITEBYTECODE": "1", "OMP_NUM_THREADS": "1",
-               "OPENBLAS_NUM_THREADS": "1", "QRAFT_OUTPUT_DIR": os.path.dirname(out_path)}
+               "OPENBLAS_NUM_THREADS": "1", "QRAFT_OUTPUT_DIR": os.path.dirname(out_path),
+               "QRAFT_DEVNULL": os.path.join(scratch, "devnull")}
         cmdline = subprocess.list2cmdline([python, "-I", "-S", "-B", os.path.join(work, RUNNER_NAME), work])
-        rc, timed_out = _run_appcontainer_process(ctypes, wintypes, sid, cmdline, env, scratch, seconds, mem_mib, stderr_path)
+        rc, timed_out, limit = _run_appcontainer_process(ctypes, wintypes, sid, cmdline, env, scratch, seconds, mem_mib,
+                                                         stderr_path, [scratch, out_path, facts["folder"]])
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-    return rc, timed_out, f"appcontainer {facts['sid']} + job object (memory, 16 processes, CPU time): no network, " \
-                          f"reads only the granted folders, writes only the output file"
+    return (rc, timed_out, f"appcontainer {facts['sid']} + job object (memory, 16 processes, CPU time): no network, "
+            f"reads only the granted folders, writes only the output file and its scratch; disk capped by the host "
+            f"watchdog", limit)
 
 
 # ── WebAssembly (wasmtime + CPython for WASI) ─────────────────────────────────────────────────────────────────────
@@ -789,15 +965,18 @@ def select_engine(image: Optional[str] = None) -> Tuple[str, Dict[str, str]]:
 
 
 def run(engine: str, work: str, out_path: str, seconds: int, mem_mib: int, site_packages: List[str],
-        python: Optional[str] = None, image: Optional[str] = None) -> Tuple[Optional[int], bool, str]:
-    """Runs `<work>/port_runner.py <work>` inside `engine`. Returns (return code or None, timed_out, description);
-    the description names an engine binary accepted only through QRAFT_TRUSTED_ENGINES."""
-    rc, timed_out, descr = _run_engine(engine, work, out_path, seconds, mem_mib, site_packages, python, image)
+        python: Optional[str] = None, image: Optional[str] = None) -> Tuple[Optional[int], bool, str, str]:
+    """Runs `<work>/port_runner.py <work>` inside `engine`. Returns (return code or None, timed_out, description,
+    limit): `limit` is the reason a cap enforced from the host was exceeded (memory, disk: sandbox-exec, appcontainer),
+    "" otherwise; the description names an engine binary accepted only through QRAFT_TRUSTED_ENGINES."""
+    res = _run_engine(engine, work, out_path, seconds, mem_mib, site_packages, python, image)
+    rc, timed_out, descr = res[:3]
+    limit = res[3] if len(res) > 3 else ""
     vouched = _VOUCHED.get("wasmtime" if engine == "wasm" else engine)
     if vouched:
         descr += (f"; engine binary {vouched} is user-owned, accepted because QRAFT_TRUSTED_ENGINES lists it "
                   f"(processes of this user can replace it)")
-    return rc, timed_out, descr
+    return rc, timed_out, descr, limit
 
 
 def _run_engine(engine: str, work: str, out_path: str, seconds: int, mem_mib: int, site_packages: List[str],
@@ -813,7 +992,7 @@ def _run_engine(engine: str, work: str, out_path: str, seconds: int, mem_mib: in
             raise OutOfDomain("python: only for the native engines (a container runs the interpreter of its image)")
         return _run_container(engine, image or default_image(), work, out_path, seconds, sp, stderr_path)
     if engine == "sandbox-exec":
-        return _run_sandbox_exec(work, out_path, seconds, sp, python, stderr_path)
+        return _run_sandbox_exec(work, out_path, seconds, mem_mib, sp, python, stderr_path)
     if engine == "appcontainer":
         return _run_appcontainer(work, out_path, seconds, mem_mib, sp, python, stderr_path)
     if python is not None:

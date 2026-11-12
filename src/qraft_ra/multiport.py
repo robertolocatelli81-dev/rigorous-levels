@@ -345,8 +345,11 @@ def run_ports(requests, python: Optional[str] = None, *, engine: str = "auto", i
         out_path = os.path.join(outdir, "output.json")
         open(out_path, "wb").close()
         open(os.path.join(work, "output.json"), "wb").close()
-        rc, timed_out, descr = isolation.run(engine, work, out_path, seconds, mem, list(reqs[0].site_packages), python, image)
+        rc, timed_out, descr, limit = isolation.run(engine, work, out_path, seconds, mem, list(reqs[0].site_packages),
+                                                    python, image)
         descr = f"{engine} (batch of {len(reqs)}): {descr}"
+        if limit:                            # a cap enforced from the host: whatever the port wrote is discarded
+            return tuple(Output(r.port, "", (), r.unit, "ERROR", limit, 0.0, descr) for r in reqs)
         if timed_out:
             return tuple(_invalid(r, f"timeout: over {seconds + 5} s (batch)", float(seconds + 5), descr) for r in reqs)
         err_path = os.path.join(work, "stderr.txt")
@@ -355,7 +358,7 @@ def run_ports(requests, python: Optional[str] = None, *, engine: str = "auto", i
             with open(err_path, "rb") as ferr:
                 ferr.seek(max(0, os.path.getsize(err_path) - 600))
                 tail = ferr.read().decode("utf-8", "replace")
-        if os.path.getsize(out_path) == 0:
+        if _output_size(out_path) == 0:
             return tuple(_invalid(r, f"no output (exit code {rc}): {tail}", 0.0, descr) for r in reqs)
         doc, reason = read_output(out_path, OUTPUT_MAX_BYTES * len(reqs))
         if doc is None:
@@ -398,9 +401,11 @@ def run_port(r: Request, python: Optional[str] = None, *, engine: str = "auto", 
         out_path = os.path.join(outdir, "output.json")
         open(out_path, "wb").close()               # the ONLY writable file of the port
         open(os.path.join(work, "output.json"), "wb").close()   # mount point for the engines that bind the file
-        rc, timed_out, descr = isolation.run(engine, work, out_path, r.seconds, r.mem_mib, list(r.site_packages),
-                                             python, image)
+        rc, timed_out, descr, limit = isolation.run(engine, work, out_path, r.seconds, r.mem_mib, list(r.site_packages),
+                                                    python, image)
         descr = f"{engine}: {descr}"
+        if limit:                            # a cap enforced from the host: whatever the port wrote is discarded
+            return Output(r.port, "", (), r.unit, "ERROR", limit, 0.0, descr)
         if timed_out:
             return _invalid(r, f"timeout: over {r.seconds + 5} s", float(r.seconds + 5), descr)
         err_path = os.path.join(work, "stderr.txt")
@@ -409,7 +414,7 @@ def run_port(r: Request, python: Optional[str] = None, *, engine: str = "auto", 
             with open(err_path, "rb") as ferr:
                 ferr.seek(max(0, os.path.getsize(err_path) - 600))
                 tail = ferr.read().decode("utf-8", "replace")
-        if os.path.getsize(out_path) == 0:
+        if _output_size(out_path) == 0:
             return _invalid(r, f"no output (exit code {rc}): {tail}", 0.0, descr)
         doc, reason = read_output(out_path)
         if doc is None:
@@ -423,6 +428,15 @@ def run_port(r: Request, python: Optional[str] = None, *, engine: str = "auto", 
     finally:
         shutil.rmtree(work, ignore_errors=True)
         shutil.rmtree(outdir, ignore_errors=True)
+
+
+def _output_size(path: str) -> int:
+    """Size of the output file as lstat sees it; 0 if the port removed it (CI 2026-11-12, Windows: the output file was
+    deleted from inside the sandbox and getsize raised FileNotFoundError out of run_port)."""
+    try:
+        return os.lstat(path).st_size
+    except OSError:
+        return 0
 
 
 def _invalid(r: Request, reason: str, seconds: float, descr: str) -> Output:

@@ -34,18 +34,67 @@ def _output_dir(folder: str) -> str:
     return os.environ.get("QRAFT_OUTPUT_DIR") or folder
 
 
+RLIMITS_CLOSED = ("cpu", "memory", "file_size", "processes")   # the limits the runner sets (docs/PORT_CONTRACT.md §6)
+
+
+def _host_limits() -> set:
+    """QRAFT_HOST_LIMITS: the limits the ENGINE enforces from the host (closed list RLIMITS_CLOSED, comma-separated);
+    an unknown name is refused, never ignored."""
+    names = {x for x in os.environ.get("QRAFT_HOST_LIMITS", "").split(",") if x}
+    unknown = names - set(RLIMITS_CLOSED)
+    if unknown:
+        raise RuntimeError(f"QRAFT_HOST_LIMITS: unknown limit(s) {sorted(unknown)}")
+    return names
+
+
 def _rlimit(seconds: int, mem_mib: int) -> None:
+    """Sets each rlimit on its own, never above the hard limit already in force (a lower one is stronger). A limit the
+    platform refuses (macOS: RLIMIT_AS, "current limit exceeds maximum limit", CI 2026-11-12) is skipped ONLY if the
+    engine enforces it from the host (QRAFT_HOST_LIMITS); otherwise the run stops with the limit named."""
     if resource is None:
         return
-    resource.setrlimit(resource.RLIMIT_CPU, (seconds, seconds))
-    resource.setrlimit(resource.RLIMIT_AS, (mem_mib * 1024 * 1024, mem_mib * 1024 * 1024))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (64 * 1024 * 1024, 64 * 1024 * 1024))
-    if os.environ.get("QRAFT_NPROC") == "cgroup":   # docker: the pids cgroup of the container is the cap
+    host = _host_limits()
+    wanted = [("cpu", "RLIMIT_CPU", seconds), ("memory", "RLIMIT_AS", mem_mib * 1024 * 1024),
+              ("file_size", "RLIMIT_FSIZE", 64 * 1024 * 1024)]
+    if os.environ.get("QRAFT_NPROC") != "cgroup":    # docker: the pids cgroup of the container is the cap
+        wanted.append(("processes", "RLIMIT_NPROC", 16))
+    for name, attr, value in wanted:
+        which = getattr(resource, attr, None)
+        try:
+            if which is None:
+                raise ValueError(f"{attr} does not exist on this platform")
+            hard = resource.getrlimit(which)[1]
+            if hard != resource.RLIM_INFINITY and 0 <= hard < value:
+                value = hard
+            resource.setrlimit(which, (value, value))
+        except (ValueError, OSError) as e:
+            if name in host:
+                continue
+            raise RuntimeError(f"{attr} cannot be set here and the engine does not enforce it: {e}")
+
+
+def _where(path: str) -> str:
+    """Placeholders of the test ports for the engines that run on host paths (sandbox-exec, appcontainer): $WORK is
+    the read-only work folder, $TMP the writable scratch folder; any other path is taken as written."""
+    if path == "$WORK":
+        return sys.argv[1]
+    if path == "$TMP":
+        return os.environ.get("TMPDIR") or os.environ.get("TEMP") or "/tmp"
+    return path
+
+
+def _devnull() -> None:
+    """QRAFT_DEVNULL (appcontainer only): the container cannot open the NUL device (CI 2026-11-12: dill, imported by
+    scqubits, failed with "Permission denied: 'nul'"), so os.devnull points at an empty file in the scratch folder,
+    counted by the engine's disk cap. Used only if NUL itself cannot be opened."""
+    alt = os.environ.get("QRAFT_DEVNULL")
+    if not alt:
         return
     try:
-        resource.setrlimit(resource.RLIMIT_NPROC, (16, 16))
-    except (ValueError, OSError):
-        pass
+        open(os.devnull, "rb").close()
+    except OSError:
+        open(alt, "wb").close()
+        os.devnull = alt
 
 
 def _numpy_rotor(model: dict, k: int, ncut: int):
@@ -160,7 +209,12 @@ def port_test_write(r):
             results.append(f"WRITTEN {p}")
         except OSError as e:
             results.append(f"blocked {p}: {type(e).__name__}")
-    results.append("real_home_visible=" + str(os.path.isdir(r["truncation"]["real_home"])))
+    try:                     # listing, not isdir: Seatbelt allows file-read-metadata everywhere (existence is visible)
+        os.listdir(r["truncation"]["real_home"])
+        visible = True
+    except OSError:
+        visible = False
+    results.append(f"real_home_visible={visible}")
     results.append(f"pid={os.getpid()}")                       # new PID namespace: a small pid
     raise RuntimeError("; ".join(results))
 
@@ -214,7 +268,7 @@ def port_test_hostile(r):
         written = 0
         for i in range(int(t["files"])):
             try:
-                with open(os.path.join(t["where"], f"f{i}"), "wb") as f:
+                with open(os.path.join(_where(t["where"]), f"f{i}"), "wb") as f:
                     for _ in range(int(t["mib"])):
                         f.write(b"\0" * 1048576)
                         written += 1
@@ -418,6 +472,7 @@ def main(folder: str) -> int:
     try:
         limits = [r.get("limits", {}) for r in reqs if isinstance(r, dict)]
         _rlimit(max(int(x.get("seconds", 1)) for x in limits), max(int(x.get("mem_mib", 16)) for x in limits))
+        _devnull()
         seen = []
         for r in reqs:
             for sp in (r.get("site_packages", []) if isinstance(r, dict) else []):

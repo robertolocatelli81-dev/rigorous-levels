@@ -73,14 +73,23 @@ besides the pre-opened folders). An explicit `engine=` never falls back to anoth
 
 Every engine runs `python -I -S -B /work/port_runner.py /work` with `/work` read-only, `/work/output.json` the only
 writable file, HOME pointing to a folder that does not exist, a minimal environment, and the runner's own rlimits
-(CPU = seconds, address space = mem_mib, file size 64 MiB, 16 processes). The same positive controls S1–S7 are
+(CPU = seconds, address space = mem_mib, file size 64 MiB, 16 processes). Each rlimit is set on its own, never above
+a lower hard limit already in force; a limit the platform refuses stops the run with the limit named, unless the
+engine enforces that limit from the host and says so in `QRAFT_HOST_LIMITS` (closed list: cpu, memory, file_size,
+processes; an unknown name is refused). Where an engine has no tmpfs or no address-space rlimit (sandbox-exec,
+appcontainer) a HOST WATCHDOG samples the run every 20 ms and once more after the exit: one file over 64 MiB, or the
+writable places over 256 MiB in all (the size of each tmpfs of bwrap), or (sandbox-exec) the resident memory of the
+process group over `mem_mib`, kill the run, and the output is `ERROR` with the reason ending in "(host watchdog)":
+what the port wrote is discarded. Sampled, not a hard cap: a port can write or allocate what fits in one interval
+before it is killed (the resident peak after the exit, from wait4, is still checked); files unlinked while open are
+not counted. The same positive controls S1–S7 are
 required of every engine (tests `test_multiport.py`, parametrized over the engines available on the machine):
 
 | control | what must happen inside, and the positive control outside |
 |---|---|
 | S1 network | a TCP connection to a listening socket of the host fails; outside the sandbox it succeeds |
 | S2 writes and home | writes outside `/work/output.json` fail; the user's real home is not visible; outside they succeed |
-| S3 time and memory | an endless loop ends with `INVALID: timeout`; allocating more than `mem_mib` gives `MemoryError` |
+| S3 time and memory | an endless loop ends with `INVALID: timeout`; allocating more than `mem_mib` gives `MemoryError` (sandbox-exec: `ERROR`, "memory: … over the mem_mib cap … (host watchdog)") |
 | S4 environment | no variable of the host session is visible, not even in `/proc/*/environ` |
 | S5 fail-closed | engine missing, or not isolating, or (containers) image absent locally → `SandboxMissing`; no fallback |
 | S6 dirty output | an unknown key, NaN, wrong length, non-JSON, symlinked or oversized output → `INVALID` with the reason |
@@ -113,16 +122,27 @@ of that user on the host (first CI run, 2026-11-12: "can't start new thread" on 
 6.3 `sandbox-exec` (macOS): deny-default Seatbelt profile; `(allow file-read*)` then `(deny file-read* (subpath
 <home>))` for each of the user's homes, then the declared pieces inside them (interpreter prefix, site-packages, work
 folder) allowed again; `(allow file-write*)` only on the output file and a scratch folder; `(deny network*)`;
-`process-exec` of the interpreter only. The probe checks network closed, root not writable, home not listable. The
-man page marks `sandbox-exec` DEPRECATED (measured in CI on the runner: `man -w sandbox-exec`, a deny-default
-profile started). Memory/CPU limits: the runner's rlimits (RLIMIT_AS effectiveness on macOS is measured by the S3
-test in CI, not assumed).
+`process-exec` of the interpreter only; the output file allows `file-write-data` only (no unlink, no create: a link
+cannot take its place). File metadata is readable everywhere (existence of a file in the home can be tested, its
+content and the listing cannot). The probe checks network closed, root not writable, home not listable, and that the
+memory watchdog reads this process (libproc `proc_pid_rusage`). The man page marks `sandbox-exec` DEPRECATED
+(measured in CI on the runner: `man -w sandbox-exec`, a deny-default profile started). Limits: CPU, file size and
+processes are the runner's rlimits; macOS refuses RLIMIT_AS ("current limit exceeds maximum limit", CI 2026-11-12),
+so the memory cap is the host watchdog (`QRAFT_HOST_LIMITS=memory`: max of resident size and physical footprint of
+the process group), and the scratch folder (on disk, not a tmpfs) is capped by the watchdog. The run is a new process
+group, killed whole at the end.
 
 6.4 `appcontainer` (Windows): AppContainer profile `qraft-ra-multiport` (CreateAppContainerProfile, SID reused if it
 exists); read-execute grants (`icacls … /grant *<SID>:(OI)(CI)RX`) on the interpreter prefix, the site-packages and
 the work folder, modify on the output file and a scratch folder; the runner started with
 PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES and no capability (no internetClient: no network), assigned to a Job
 Object with process-memory, active-process (16) and CPU-time limits, killed on timeout (TerminateJobObject).
+The output file is granted `(R,W)` (no DELETE: with `M` the port removed it). Windows has no file-size rlimit and the
+Job Object no disk limit: the host watchdog caps the scratch folder, the output file and the AppContainer's own
+profile folder (`GetAppContainerFolderPath`, writable by the container and kept between runs: only its growth during
+the run is counted). The container cannot open the NUL device (CI 2026-11-12: `open('nul')` → PermissionError in
+dill, imported by scqubits): the runner then points `os.devnull` at an empty file in the scratch folder
+(`QRAFT_DEVNULL`), counted by the disk cap.
 The environment is a closed list: SYSTEMROOT, WINDIR, SYSTEMDRIVE, COMSPEC, PATHEXT copied, PATH = SYSTEMROOT,
 USERPROFILE, LOCALAPPDATA, APPDATA, HOME, TEMP, TMP inside the scratch folder, plus the runner's own variables.
 The probe checks network closed, %SystemRoot% not writable, home not listable. The read-execute grants are not

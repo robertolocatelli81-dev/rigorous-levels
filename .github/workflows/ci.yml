@@ -128,6 +128,29 @@ jobs:
           which sandbox-exec
           man -w sandbox-exec || true
           sandbox-exec -p '(version 1)(deny default)(allow process-exec (literal "/usr/bin/true"))(allow file-read*)' /usr/bin/true && echo "sandbox-exec runs a deny-default profile"
+      - name: Which rlimits macOS applies (measured here, not assumed; the memory cap of sandbox-exec is the host watchdog)
+        run: |
+          for n in RLIMIT_AS RLIMIT_DATA RLIMIT_RSS RLIMIT_FSIZE RLIMIT_CPU RLIMIT_NPROC; do
+            python - "$n" <<'PY'
+          import resource, sys
+          n = sys.argv[1]
+          w = getattr(resource, n, None)
+          v = {"RLIMIT_FSIZE": 64 << 20, "RLIMIT_CPU": 10, "RLIMIT_NPROC": 16}.get(n, 256 << 20)
+          line = f"{n}: getrlimit {resource.getrlimit(w) if w is not None else 'absent'}"
+          try:
+              resource.setrlimit(w, (v, v))
+              line += f"; setrlimit({v}) accepted"
+              if v == 256 << 20:
+                  try:
+                      a = bytearray(3000 << 20); a[::65536] = b"1" * len(a[::65536])
+                      line += "; 3000 MiB allocated and touched: NOT enforced"
+                  except MemoryError:
+                      line += "; 3000 MiB: MemoryError (enforced)"
+          except (ValueError, OSError, TypeError) as e:
+              line += f"; setrlimit refused: {type(e).__name__}: {e}"
+          print(line)
+          PY
+          done
       - name: Install and test (the sandbox-exec S1 test must run)
         run: |
           python -m pip install -r requirements/ci.txt
@@ -152,6 +175,29 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
+      - name: What an AppContainer process can open (NUL device) and where its own folder is (measured, not assumed)
+        shell: bash
+        run: |
+          python -m pip install --no-deps .
+          python - <<'PY'
+          import os, subprocess, sys, tempfile
+          from qraft_ra import isolation as I
+          ctypes, wt = I._win()
+          sid, s = I._appcontainer_sid(ctypes, wt, "qraft-ra-multiport")
+          d = tempfile.mkdtemp(prefix="qraft_measure_")
+          I._icacls(d, s, "M")
+          for p in (sys.base_prefix, sys.prefix):
+              I._icacls(p, s, "RX")
+          probe, out = os.path.join(d, "p.py"), os.path.join(d, "o.txt")
+          with open(probe, "w") as f:
+              f.write("import sys\nr = []\nfor m in ('rb', 'wb', 'r+b'):\n    try:\n        open('nul', m).close(); r.append(m + ' ok')\n"
+                      "    except OSError as e:\n        r.append(f'{m} {type(e).__name__} {e.errno}')\nopen(sys.argv[1], 'w').write('; '.join(r))\n")
+          env = {**I._appcontainer_base_env(d), "TEMP": d, "TMP": d}
+          cmd = subprocess.list2cmdline([sys.executable, "-I", "-S", "-B", probe, out])
+          print("exit:", I._run_appcontainer_process(ctypes, wt, sid, cmd, env, d, 60, 1024, os.path.join(d, "e.txt")))
+          print("open('nul') inside the AppContainer:", open(out).read() if os.path.exists(out) else open(os.path.join(d, "e.txt")).read())
+          print("AppContainer folder:", I._appcontainer_folder(ctypes, wt, s))
+          PY
       - name: Install and test (the appcontainer S1 test must run)
         shell: bash
         run: |

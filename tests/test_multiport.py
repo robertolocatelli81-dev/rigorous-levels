@@ -52,14 +52,25 @@ def request(port="numpy_rotor", **kw):
     return MP.Request(**base)
 
 
+# engines that run on host paths (no /work, /tmp of their own): the disk controls use the runner's $WORK and $TMP
+HOST_PATH_ENGINES = ("sandbox-exec", "appcontainer")
+# Windows: a process without these cannot start its socket layer (WinError 10106 without SYSTEMROOT, CI 2026-11-12)
+WINDOWS_SYSTEM_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT")
+
+
 def runner_direct(r, timeout=30):
-    """Esegue il runner SENZA sandbox (solo nei test, come check positivo): ciò che qui riesce, dentro deve fallire."""
+    """Esegue il runner SENZA sandbox (solo nei test, come check positivo): ciò che qui riesce, dentro deve fallire.
+    QRAFT_HOST_LIMITS=memory: fuori dalla sandbox nessuno impone la memoria, e macOS rifiuta RLIMIT_AS."""
     work = tempfile.mkdtemp(prefix="qraft_port_direct_")
     try:
         with open(os.path.join(work, "request.json"), "w") as f:
             json.dump(r.json(), f)
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": tempfile.mkdtemp(prefix="home_prova_"),
+               "QRAFT_HOST_LIMITS": "memory"}
+        if os.name == "nt":
+            env.update({k: os.environ[k] for k in WINDOWS_SYSTEM_ENV if k in os.environ})
         subprocess.run([sys.executable, "-I", "-B", str(MP.RUNNER), work], capture_output=True, text=True, timeout=timeout,
-                       env={"PATH": os.environ.get("PATH", ""), "HOME": tempfile.mkdtemp(prefix="home_prova_")})
+                       env=env)
         with open(os.path.join(work, "output.json")) as f:
             return json.load(f)
     finally:
@@ -113,6 +124,33 @@ class TestContrattoChiuso(unittest.TestCase):
             MP.compare(iv, "eV", u_ok)
 
 
+def _win_missing():
+    raise MP.SandboxMissing("appcontainer: Windows API unavailable (test)")
+
+
+def _peak_rss_bytes():
+    """Peak resident size of this process: ru_maxrss (KiB on Linux, bytes on macOS) or PeakWorkingSetSize (Windows)."""
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        class PMC(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD)] + [
+                (n, ctypes.c_size_t) for n in ("PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage",
+                                               "QuotaPagedPoolUsage", "QuotaPeakNonPagedPoolUsage",
+                                               "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage")]
+        c = PMC()
+        c.cb = ctypes.sizeof(c)
+        k32 = ctypes.WinDLL("kernel32")
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        if not ctypes.WinDLL("psapi").GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(c), c.cb):
+            raise OSError("GetProcessMemoryInfo failed")
+        return c.PeakWorkingSetSize
+    import resource
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak if sys.platform == "darwin" else peak * 1024
+
+
 class _SandboxTests:
     """S1–S7 of docs/PORT_CONTRACT.md §6, run once per isolation engine available here (one subclass per engine).
     Every control must be ABLE to fail: the runner outside the sandbox does what inside must be blocked."""
@@ -129,16 +167,18 @@ class _SandboxTests:
             self.skipTest(f"{self.ENGINE}: no numpy inside (declared): solver ports cannot run")
 
     def test_s5_engine_missing_fail_closed(self):
-        """S5: the engine's executable missing on PATH → SandboxMissing, nothing runs (no fallback)."""
+        """S5: the engine missing → SandboxMissing, nothing runs (no fallback). Missing = its executable not on PATH;
+        appcontainer has no executable: missing = the Windows API unavailable (_win refuses)."""
         from qraft_ra import isolation
-        original, probes = isolation.shutil.which, dict(isolation._PROBES)
+        original, probes, win = isolation.shutil.which, dict(isolation._PROBES), isolation._win
         isolation.shutil.which = lambda name: None
+        isolation._win = _win_missing
         isolation._PROBES.clear()
         try:
             with self.assertRaises(MP.SandboxMissing):
                 self.run_port(request("numpy_rotor"))
         finally:
-            isolation.shutil.which = original
+            isolation.shutil.which, isolation._win = original, win
             isolation._PROBES.update(probes)
 
     def test_s5_probe_that_does_not_isolate_fail_closed(self):
@@ -272,7 +312,13 @@ class _SandboxTests:
     def test_s3_memoria(self):
         u = self.run_port(request("test_memory", truncation={"mib": 3000}, mem_mib=256))
         self.assertEqual(u.state, "ERROR", u)
-        self.assertIn("MemoryError", u.reason)
+        if self.ENGINE == "sandbox-exec":     # macOS refuses RLIMIT_AS: the host watchdog kills and says why
+            self.assertRegex(u.reason, r"^memory: .* over the mem_mib cap of 256 MiB \(host watchdog\)$")
+        else:
+            self.assertIn("MemoryError", u.reason)
+        self.assertNotIn("ALLOCATED", u.solver_version)
+        d = runner_direct(request("test_memory", truncation={"mib": 300}, mem_mib=1024))  # the port does allocate
+        self.assertEqual(d["state"], "OK", d)
 
     def test_s4_ambiente_pulito(self):
         """PYTHONPATH/HOME della sessione non arrivano: la port vede HOME = /tmp/nohome (inesistente)."""
@@ -337,8 +383,15 @@ class _SandboxTests:
         u = self.run_port(request("test_hostile", truncation={"mode": "symlink", "target": "/etc/hostname"}))
         self.assertEqual(u.state, "ERROR", u)
         self.assertIn("symlink blocked", u.reason)
-        u = self.run_port(request("test_hostile", truncation={"mode": "disk", "where": "/work", "files": 2, "mib": 1}))
+        host_paths = self.ENGINE in HOST_PATH_ENGINES
+        u = self.run_port(request("test_hostile", truncation={"mode": "disk", "where": "$WORK" if host_paths else "/work",
+                                                               "files": 2, "mib": 1}))
         self.assertRegex(u.reason, r"disk: 0 MiB then (OSError|PermissionError)")
+        if host_paths:                        # no tmpfs: the scratch folder is on disk, its total watched from the host
+            u = self.run_port(request("test_hostile", truncation={"mode": "disk", "where": "$TMP", "files": 6, "mib": 60}))
+            self.assertEqual(u.state, "ERROR", u)
+            self.assertRegex(u.reason, rf"^disk: \d+ MiB written over the {MP.TMPFS_BYTES >> 20} MiB cap \(host watchdog\)$")
+            return
         for where in ("/tmp", "/dev/shm", "/home"):           # tmpfs in RAM: tetto per ciascuno (RLIMIT_AS non li conta)
             u = self.run_port(request("test_hostile", truncation={"mode": "disk", "where": where, "files": 6, "mib": 60}))
             self.assertRegex(u.reason, r"then (OSError|PermissionError|FileNotFoundError)", where)   # WASI: no /tmp at all
@@ -346,12 +399,11 @@ class _SandboxTests:
 
 
     def test_stdout_illimitato_non_entra_in_memoria(self):
-        import resource
-        prima = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        prima = _peak_rss_bytes()
         u = self.run_port(request("test_hostile", truncation={"mode": "stdout", "mib": 300}))
-        dopo = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        dopo = _peak_rss_bytes()
         self.assertEqual(u.state, "ERROR", u)
-        self.assertLess(dopo - prima, 100 * 1024, (prima, dopo))           # KiB: con capture_output cresce di ≥ 300 MiB
+        self.assertLess(dopo - prima, 100 << 20, (prima, dopo))            # con capture_output cresce di ≥ 300 MiB
 
 
     def test_site_packages_sola_lettura_e_rlimit(self):
@@ -368,9 +420,13 @@ class _SandboxTests:
         self.assertFalse(esiste)
         u = self.run_port(request("test_hostile", truncation={"mode": "fork"}))
         self.assertLessEqual(int(u.reason.split("fork: ")[1]), 16, u.reason)
-        u = self.run_port(request("test_hostile", truncation={"mode": "disk", "where": "/tmp", "files": 1, "mib": 70}))
+        u = self.run_port(request("test_hostile", truncation={"mode": "disk", "files": 1, "mib": 70,
+                                                               "where": "$TMP" if self.ENGINE in HOST_PATH_ENGINES else "/tmp"}))
         if self.ENGINE == "wasm":                             # no rlimit and no writable scratch at all under WASI
             self.assertRegex(u.reason, r"disk: 0 MiB then FileNotFoundError")
+        elif self.ENGINE == "appcontainer":                   # no RLIMIT_FSIZE on Windows: the host watchdog, after exit too
+            self.assertEqual(u.state, "ERROR", u)
+            self.assertRegex(u.reason, r"^disk: a file of \d+ MiB over the 64 MiB cap \(host watchdog\)$")
         else:
             self.assertRegex(u.reason, r"disk: 64 MiB then (OSError|PermissionError)")
         u = self.run_port(request("test_hostile", truncation={"mode": "cpu"}, seconds=2))
@@ -576,6 +632,180 @@ class TestCI20261112Platforms(unittest.TestCase):
                 R._rlimit(10, 512)
                 chiamati = [c.args[0] for c in s.call_args_list]
                 self.assertEqual(R.resource.RLIMIT_NPROC in chiamati, attesa, env)
+
+
+class TestCI20261112Watchdog(unittest.TestCase):
+    """CI runs of 2026-11-12 on macOS and Windows: each test fails on the tree before the fix (positive control)."""
+
+    class FakeResource:
+        RLIMIT_CPU, RLIMIT_AS, RLIMIT_FSIZE, RLIMIT_NPROC, RLIM_INFINITY = 0, 5, 1, 7, -1
+
+        def __init__(self, refuse=(), hard=None):
+            self.refuse, self.hard, self.set = refuse, hard or {}, {}
+
+        def getrlimit(self, which):
+            return (self.RLIM_INFINITY, self.hard.get(which, self.RLIM_INFINITY))
+
+        def setrlimit(self, which, value):
+            if which in self.refuse:
+                raise ValueError("current limit exceeds maximum limit")
+            h = self.hard.get(which, self.RLIM_INFINITY)
+            if h != self.RLIM_INFINITY and value[1] > h:
+                raise ValueError("not allowed to raise maximum limit")
+            self.set[which] = value
+
+    def _rlimit(self, fake, env):
+        from unittest import mock
+        from qraft_ra import port_runner as R
+        with mock.patch.object(R, "resource", fake), mock.patch.dict(os.environ, env, clear=False):
+            for k in ("QRAFT_HOST_LIMITS", "QRAFT_NPROC"):
+                if k not in env:
+                    os.environ.pop(k, None)
+            R._rlimit(10, 512)
+
+    def test_rlimit_refused_by_the_platform_stops_unless_the_engine_enforces_it(self):
+        F = self.FakeResource
+        f = F(refuse=(F.RLIMIT_AS,))
+        with self.assertRaisesRegex(RuntimeError, "RLIMIT_AS cannot be set here"):
+            self._rlimit(f, {})
+        f = F(refuse=(F.RLIMIT_AS,))
+        self._rlimit(f, {"QRAFT_HOST_LIMITS": "memory"})               # macOS + sandbox-exec: the host watches
+        self.assertEqual(f.set, {F.RLIMIT_CPU: (10, 10), F.RLIMIT_FSIZE: (64 << 20, 64 << 20), F.RLIMIT_NPROC: (16, 16)})
+        f = F(refuse=(F.RLIMIT_CPU,))                                   # host enforcement is per limit, not for all
+        with self.assertRaisesRegex(RuntimeError, "RLIMIT_CPU"):
+            self._rlimit(f, {"QRAFT_HOST_LIMITS": "memory"})
+        with self.assertRaisesRegex(RuntimeError, "unknown limit"):
+            self._rlimit(F(), {"QRAFT_HOST_LIMITS": "memory,everything"})
+
+    def test_rlimit_never_above_a_lower_hard_limit(self):
+        F = self.FakeResource
+        f = F(hard={F.RLIMIT_NPROC: 8})
+        self._rlimit(f, {})
+        self.assertEqual(f.set[F.RLIMIT_NPROC], (8, 8))                  # before: (16, 16) refused, then skipped
+
+    def _run_port_with(self, fake_run):
+        from unittest import mock
+        from qraft_ra import isolation
+        with mock.patch.object(isolation, "probe", lambda *a, **k: {}), mock.patch.object(isolation, "run", fake_run):
+            return MP.run_port(request("python_rotor"), engine="bwrap")
+
+    def test_output_removed_by_the_port_is_invalid_not_an_exception(self):
+        def fake_run(engine, work, out_path, *a):
+            os.remove(out_path)                                          # Windows, M grant: the port deleted it
+            return 1, False, "fake", ""
+        u = self._run_port_with(fake_run)
+        self.assertEqual(u.state, "INVALID", u)
+        self.assertIn("no output", u.reason)
+
+    def test_host_limit_discards_what_the_port_wrote(self):
+        def fake_run(engine, work, out_path, *a):
+            with open(out_path, "w") as f:
+                json.dump({"contract": MP.CONTRACT, "port": "python_rotor", "solver_version": "x", "levels": [0.0] * 6,
+                           "unit": "GHz", "state": "OK", "reason": "", "seconds": 0.0}, f)
+            return 0, False, "fake", "memory: 300 MiB resident over the mem_mib cap of 256 MiB (host watchdog)"
+        u = self._run_port_with(fake_run)
+        self.assertEqual((u.state, u.levels), ("ERROR", ()), u)
+        self.assertIn("host watchdog", u.reason)
+
+    def test_seatbelt_output_file_writable_data_only(self):
+        from qraft_ra import isolation
+        prof = isolation.seatbelt_profile(sys.executable, [], "/qraft_x/o.json", "/qraft_x/s")
+        self.assertIn('(allow file-write-data (literal "/qraft_x/o.json"))', prof)
+        self.assertNotIn('file-write* (literal "/qraft_x/o.json")', prof)   # unlink/create would allow a link there
+        self.assertIn('(allow file-write* (subpath "/qraft_x/s"))', prof)
+
+    def test_appcontainer_output_grant_without_delete(self):
+        from qraft_ra import isolation
+        self.assertEqual(isolation.OUTPUT_GRANT, "(R,W)")                # M includes DELETE: output.json was removed
+
+    def test_disk_reason_caps(self):
+        from unittest import mock
+        from qraft_ra import isolation
+        d = tempfile.mkdtemp(prefix="qraft_disk_")
+        try:
+            with mock.patch.object(isolation, "FILE_CAP", 4 << 20), mock.patch.object(isolation, "TMPFS_BYTES", 8 << 20):
+                with open(os.path.join(d, "a"), "wb") as f:
+                    f.write(b"\0" * (3 << 20))
+                self.assertEqual(isolation.disk_reason([d]), "")                         # positive control
+                os.makedirs(os.path.join(d, "sub"))
+                for n in ("b", "sub/c"):
+                    with open(os.path.join(d, n), "wb") as f:
+                        f.write(b"\0" * (3 << 20))
+                self.assertRegex(isolation.disk_reason([d]), r"^disk: 9 MiB written over the 8 MiB cap")
+                self.assertEqual(isolation.disk_reason([d], base=(6 << 20, 0)), "")       # what was there before
+                with open(os.path.join(d, "sub", "c"), "ab") as f:
+                    f.write(b"\0" * (2 << 20))
+                self.assertRegex(isolation.disk_reason([d]), r"^disk: a file of 5 MiB over the 4 MiB cap")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    @unittest.skipUnless(sys.platform.startswith("linux") or sys.platform == "darwin", "host watchdog: Linux/macOS")
+    def test_run_watched_kills_over_memory_and_catches_a_short_peak(self):
+        from qraft_ra import isolation
+        d = tempfile.mkdtemp(prefix="qraft_watch_")
+        try:
+            err = os.path.join(d, "err.txt")
+            hold = "a = bytearray(400 << 20); a[::4096] = b'1' * len(a[::4096]); import time; time.sleep(20)"
+            rc, to, why = isolation.run_watched([sys.executable, "-c", hold], 30, err, {}, 128 << 20, [d])
+            self.assertRegex(why, r"^memory: \d+ MiB resident over the mem_mib cap of 128 MiB \(host watchdog\)$")
+            self.assertFalse(to)
+            peak = "a = bytearray(400 << 20); a[::4096] = b'1' * len(a[::4096]); del a"
+            rc, to, why = isolation.run_watched([sys.executable, "-c", peak], 30, err, {}, 128 << 20, [d])
+            self.assertRegex(why, r"^memory: ")                              # sampled or, after exit, the peak
+            rc, to, why = isolation.run_watched([sys.executable, "-c", peak], 30, err, {}, 2048 << 20, [d])
+            self.assertEqual((rc, to, why), (0, False, ""))                  # positive control: under the cap
+            rc, to, why = isolation.run_watched([sys.executable, "-c", "import time; time.sleep(30)"], 1, err, {}, 0, [d])
+            self.assertEqual((rc, to, why), (None, True, ""))
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    @unittest.skipUnless(os.name == "posix", "host watchdog: POSIX process groups")
+    def test_run_watched_disk_and_no_child_left_behind(self):
+        from unittest import mock
+        from qraft_ra import isolation
+        d = tempfile.mkdtemp(prefix="qraft_watch_")
+        try:
+            err = os.path.join(d, "err.txt")
+            code = (f"import os, time\nif os.fork() == 0:\n    time.sleep(60); os._exit(0)\n"
+                    f"open({os.path.join(d, 'big')!r}, 'wb').write(b'0' * (6 << 20))\n")
+            with mock.patch.object(isolation, "FILE_CAP", 4 << 20):
+                rc, to, why = isolation.run_watched([sys.executable, "-c", code], 30, err, {}, 0, [d])
+            self.assertRegex(why, r"^disk: a file of 6 MiB over the 4 MiB cap \(host watchdog\)$")
+            out = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True, text=True).stdout
+            self.assertNotIn("time.sleep(60)", out)                          # the fork was killed with the group
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "geteuid") and os.geteuid() != 0, "chmod: POSIX non-root")
+    def test_real_home_visible_means_listable(self):
+        d = tempfile.mkdtemp(prefix="qraft_home_")
+        try:
+            os.chmod(d, 0o311)                                               # exists (isdir True), not listable
+            r = request("test_write", truncation={"path": os.path.join(d, "x", "y"), "real_home": d})
+            self.assertIn("real_home_visible=False", runner_direct(r)["reason"])
+            os.chmod(d, 0o755)
+            self.assertIn("real_home_visible=True", runner_direct(r)["reason"])   # positive control
+        finally:
+            os.chmod(d, 0o755)
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_devnull_redirected_only_when_nul_cannot_be_opened(self):
+        from unittest import mock
+        from qraft_ra import port_runner as R
+        d = tempfile.mkdtemp(prefix="qraft_nul_")
+        alt = os.path.join(d, "devnull")
+        original = os.devnull
+        try:
+            with mock.patch.dict(os.environ, {"QRAFT_DEVNULL": alt}):
+                R._devnull()
+                self.assertEqual(os.devnull, original)                       # NUL opens: untouched
+                os.devnull = os.path.join(d, "no", "such")
+                R._devnull()
+                self.assertEqual(os.devnull, alt)
+                self.assertEqual(os.path.getsize(alt), 0)
+        finally:
+            os.devnull = original
+            shutil.rmtree(d, ignore_errors=True)
 
 
 class TestNemesis030EngineTrust(unittest.TestCase):
@@ -1012,15 +1242,16 @@ class TestFailClosedProbes(unittest.TestCase):
     def test_select_engine_with_every_probe_failing(self):
         probes = dict(isolation._PROBES)
         isolation._PROBES.clear()
-        original = isolation.shutil.which
+        original, win = isolation.shutil.which, isolation._win
         isolation.shutil.which = lambda name: None
+        isolation._win = _win_missing                 # appcontainer has no executable: its API made unavailable
         try:
             with self.assertRaises(MP.SandboxMissing) as cm:
                 isolation.select_engine()
             for e in isolation.ENGINE_ORDER:
                 self.assertIn(e, str(cm.exception))
         finally:
-            isolation.shutil.which = original
+            isolation.shutil.which, isolation._win = original, win
             isolation._PROBES.update(probes)
 
     def test_wasm_writable_interpreter_folder_refused(self):
