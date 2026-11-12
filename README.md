@@ -233,7 +233,7 @@ Every row is a measurement of 2026-11-10/11 on this tree (details and dates in "
 | spherical rotor in a field | `guaranteed_sphere_levels` | numpy at a larger cut | yes / no | 60 random (B, dE, M): numpy at a cut 40 larger inside in 240 of 240 levels; Blackmore et al. 2018: 130.3 Hz guaranteed vs 129 Hz | 0.36 ms / 0.10 ms (numpy 3.5× faster) | D_c with fewer than k levels in the model (refused) | `bench/duffing_adapter_sphere.py`, `tests/test_spherical_rotor.py` |
 | ¹Σ molecule, hyperfine + Zeeman + Stark | `guaranteed_molecule_levels` | diatomic-py 2.1.0, CeNTREX-TlF 0.4.0 | yes (7 mHz on RbCs) / no (`Nmax`, `Jmax` by hand) | Gregory et al. 2016: 16 of 16 transitions within 100 Hz of their model (`bench/gregory2016.py`); diatomic-py's code has the wrong sign of c₃ (issue #15); CeNTREX default `Jmax = J+2` errs 4.26 MHz at 10 kV/cm (measured 2026-11-11 in the author's repository with their package; the port `centrex_tlf` reproduces their levels here) | 37 ms (L = 3, 1 level) to seconds per sector / ms | L > 64, 2I > 40 (refused); fields not along z (not modelled) | `bench/gregory2016.py`, `tests/test_hyperfine_molecule.py`, `tests/test_port_centrex_tlf.py` |
 | convergence warning for scqubits; `check(scqubits_obj)` | `scqubits_spectrum`, `check` (= `guaranteed_from_scqubits`) | scqubits alone | no (empirical, declared rule) / none; `check` gives the guaranteed verdict | rule: 0 results `OK` outside the threshold in 4280 runs; `check` at ncut 30 on the 200 wide-range transmons: 70 OUTSIDE beyond 1e-6 GHz = exactly the 70 the rule flags (0 flagged by one and not the other), 76 outside the float floor; device regime 0 of 200 | 2 scqubits calls / 1 (0.06–0.10 s) | the border ±1e-4 of the threshold | `bench/check_200.py`, `tests/test_parameter_balls.py` |
-| running other people's solvers | multiport, 6 engines, batches | — | fail-closed isolation, closed contract | S1–S7 controls pass for bwrap, podman and wasm (measured here); docker, sandbox-exec, appcontainer: CI only | 1.0–1.1 s per single run; 0.012–0.023 s per case in a batch of 100 (podman; `bench/multiport_batch.py`) | an engine whose probe fails (`SandboxMissing`, no fallback) | `tests/test_multiport.py`, `bench/multiport_batch.py` |
+| running other people's solvers | multiport, 6 engines, batches | — | fail-closed isolation, closed contract | S1–S7 controls pass for bwrap, podman and wasm (measured here); docker, sandbox-exec, appcontainer: in CI (run 43165166338) | 1.0–1.1 s per single run; 0.012–0.023 s per case in a batch of 100 (podman; `bench/multiport_batch.py`) | an engine whose probe fails (`SandboxMissing`, no fallback) | `tests/test_multiport.py`, `bench/multiport_batch.py` |
 
 Where the other tool is better it is written: scipy and scqubits are 37–340× faster on these inputs; they give no
 bound. The timings are medians of 5 runs on the author's machine (`bench/compare_tools.py` prints the platform).
@@ -258,7 +258,7 @@ unless stated):
 | scipy `mathieu_a/b` against those intervals | 1.17.1 (3.11.2) and 1.18.1 (3.12.15): 52 wrong, identical lists, 30 equal to another order ≤ 12, all 52 confirmed wrong by an independent tridiagonal reference (K = 400); 2.0.0.dev0+git20261108.c9073e6 (3.13.15): 0 wrong; scipy median 3.6 µs per value |
 | fluxonium, 4 published parameter sets, 4 levels | all `GUARANTEED`, width 5e-10 GHz, N = 54…117, 0.4–6.5 s; scqubits 4.3.1 cutoff 110 inside 16 of 16 levels, cutoff 6 outside |
 | fluxonium vs measured lines (one-mode H, parameters as printed) | Zhang et al. 2021: f01 13.88 MHz guaranteed vs 14 MHz measured; Moskalenko et al. 2022 qubit A: 685.73 vs 688.22 MHz (f01), 1831.20 vs 1832 MHz (f12); shifts reported, not judged |
-| isolation engines, controls S1–S7 | bwrap 0.8.0, podman 4.3.1 (rootless, cgroups v1) and wasmtime 50.0.1 + CPython 3.15.2 WASI (a user-installed wasmtime, listed in `QRAFT_TRUSTED_ENGINES`): all S1–S7 pass (the control ports are pure Python; under WASI only the numpy solver ports cannot run, there is no numpy for WASI); docker, sandbox-exec, appcontainer: not measured locally (CI jobs written) |
+| isolation engines, controls S1–S7 | bwrap 0.8.0, podman 4.3.1 (rootless, cgroups v1) and wasmtime 50.0.1 + CPython 3.15.2 WASI (a user-installed wasmtime, listed in `QRAFT_TRUSTED_ENGINES`): all S1–S7 pass (the control ports are pure Python; under WASI only the numpy solver ports cannot run, there is no numpy for WASI); docker, sandbox-exec, appcontainer: not measured locally; in CI run 43165166338 (2026-11-12) every S1–S7 test of docker (Linux x86-64 and ARM64), sandbox-exec (macOS, Python 3.12 and 3.14; the scqubits test skipped, scqubits is not installed there) and appcontainer (Windows, Python 3.12 and 3.14; its diatomic-py half skipped, not installed) passes |
 | matrix elements, 200 transmons of the device regime, ⟨0|n|1⟩, ⟨1|n|2⟩, ⟨0|n|2⟩, ⟨0|cos φ|1⟩, ⟨1|cos φ|2⟩ (`bench/matrix_elements.py`) | 1000 of 1000 enclosures contain the scqubits 4.3.1 value (ncut 40); 0 without a bound; width median 2.7e-14, max 3.1e-12; 0.058 s median per element |
 | parameters as intervals, 200 transmons of the device regime, E_C and E_J ± 1 %, 6 levels, 5 inner points each (`bench/parameter_balls.py`) | 200 of 200 box intervals `GUARANTEED`; 0 of 1000 inner point intervals outside the box interval; a point with E_J 3 % above the box falls outside in 187 of 200 cases; box width / observed spread of the inner points: median 2.1, max 5.5; 0.11 s median per box |
 | generative input tests (seeded, every public entry point) | found and fixed before this commit: OverflowError on integers beyond float64 in 4 entry points, `nmax_limit` not validated, uncapped `M`, `L_limit`, `N_limit`, `**kw` in `mathieu_a/b` |
@@ -291,7 +291,8 @@ package, not the source tree). The sandbox tests run once per isolation engine w
 in a fresh interpreter and checks what it prints. `bench/matrix.sh VENV...` reproduces the CI matrix locally (stack
 default / unlimited / 1 MiB, engines present, bwrap absent, bwrap failing; fresh HOME per run).
 
-Measured on 2026-11-12 (03:01 CET) on this tree with `bench/matrix.sh` on the four venvs, each run against the
+Measured on 2026-11-12 (03:01 CET) on the tree of commit f55a975 (before the macOS/Windows fixes of the same day)
+with `bench/matrix.sh` on the four venvs, each run against the
 package installed from the tree in a fresh temporary HOME, bwrap 0.8.0, podman 4.3.1 with the image
 `python:<minor>-slim` in the local store, wasmtime 50.0.1 (listed in `QRAFT_TRUSTED_ENGINES`) + CPython 3.15.2 WASI:
 20 of 20 runs OK, 340 tests each.
@@ -320,12 +321,17 @@ tree: fast set 9 of 9 PASS (the 2 slow claims print `[SLOW]` and run only with `
 
 Determinism: `python -m qraft_ra.reproduce --hash` prints the sha256 of a fixed set of exact enclosures. Measured on
 2026-11-11: `c3ae60dd0a4ab2db23f0091269777fe24e4d2acc2434e7298d860e6437c8cd0c` on Python 3.11.2 (numpy 2.4.6, scipy
-1.17.1), 3.12.15, 3.13.15 and 3.14.8 (numpy 2.5.4, scipy 1.18.1), Linux x86-64; the CI jobs print it on Linux ARM64,
-macOS and Windows (not run yet: the result is not known).
+1.17.1), 3.12.15, 3.13.15 and 3.14.8 (numpy 2.5.4, scipy 1.18.1), Linux x86-64. The hash is NOT the same on every
+machine (CI runs 43162320603, 43163743554, 43165166338): one value per platform on Linux ARM64 (`cc1e384538a6…`),
+macOS (`3bc6a9913bcf…`) and Windows (`cf90aeb9a1bd…`, run 43165166338), while the Linux x86-64 jobs give either
+`c3ae60dd0a4a…` or `70f84493ad1e…`, changing from run to run for the same Python and stack (so with the runner
+machine, not the configuration). The cause is not investigated yet; until it is, the hash compares runs on the same
+machine only.
 
 CI: the workflow of 0.3.0 (`.github/workflows/ci.yml`: Linux x86-64 3.10–3.14 with three stack sizes and the
-bwrap/podman/docker engines, Linux ARM64, macOS, Windows, free-threaded 3.14t) has not run yet: it runs when this
-branch is pushed. The last green run of the published code is 43075004652 on commit 7beff99 (0.2.0, 2026-11-11,
+bwrap/podman/docker engines, Linux ARM64, macOS, Windows, free-threaded 3.14t): run 43165166338 on commit d93eda1
+(branch dev-0.3, 2026-11-12), 16 of 16 jobs green (358 tests on Linux x86-64, 348 on macOS and Windows, 316 on Linux
+ARM64, 94 on 3.14t). The last green run of the published code is 43075004652 on commit 7beff99 (0.2.0, 2026-11-11,
 Python 3.10–3.14, 161 tests each).
 
 ## Limits
@@ -340,8 +346,13 @@ Python 3.10–3.14, 161 tests each).
   elements: charge-basis rotor only (not the molecule's dipoles); the parameter box is rigorous but loose (Lipschitz
   constant 1 in each coefficient).
 - Multiport: user-namespace or container sandboxes, not VMs; `sandbox-exec`, `appcontainer` and `docker` were written
-  from the vendors' documentation and are measured only by the CI jobs (not yet run); the WebAssembly engine runs the
-  pure-Python ports (reference, controls), not the numpy solvers (no numpy exists for WASI).
+  from the vendors' documentation and are measured only by the CI jobs (green in run 43165166338); the WebAssembly
+  engine runs the pure-Python ports (reference, controls), not the numpy solvers (no numpy exists for WASI).
+- Multiport on macOS and Windows: some caps come from a host watchdog that samples every 20 ms and once more after
+  the exit, not from the kernel: memory on sandbox-exec (macOS refuses RLIMIT_AS, RLIMIT_DATA and RLIMIT_RSS,
+  measured in CI), the scratch disk on both, the CPU time on appcontainer next to the Job Object's own limit
+  (Windows checks that one only periodically). A port can exceed a cap by what it does in one interval before it is
+  killed; files unlinked while open are not counted (docs/PORT_CONTRACT.md §6).
 - Adapter: the float floor is a plausible bound (16× the nominal tolerance of LAPACK ?stebz), not a proof.
 - Speed: see the table above.
 

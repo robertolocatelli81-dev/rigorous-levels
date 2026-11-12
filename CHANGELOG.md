@@ -269,6 +269,10 @@ Earlier, after run 43162320603 (Windows: `$TMP` gave FileNotFoundError inside th
 `$TMP` placeholder follows `tempfile.gettempdir()` (where a solver's temporary files go) and the disk error names the
 folder; the Seatbelt-profile test built POSIX paths that `realpath` changes on Windows (a test defect).
 
+Result: run 43165166338 on commit d93eda1, 16 of 16 jobs green; every S1–S7 test of sandbox-exec (macOS 3.12, 3.14)
+and appcontainer (Windows 3.12, 3.14) ran and passed (one skip each for a solver not installed there). The CI also
+showed that the determinism hash differs between machines (README, "Determinism"); not investigated in this entry.
+
 Test and CI fixes: tests that need `pwd`, a `sh` fake interpreter or `SIGALRM` are POSIX-only or use a thread with a
 time limit; the examples get a fresh `USERPROFILE` on Windows (qutip needs a home); scqubits 4.3.1 is not installed
 on macOS, where it requires scipy ≤ 1.13.1 (its scqubits tests are skipped there with the reason).
