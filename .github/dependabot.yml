@@ -1,0 +1,10 @@
+# Weekly update proposals for the SHA-pinned GitHub Actions of .github/workflows (each one arrives as a pull request
+# that the CI tests; nothing is merged automatically). Python dependencies are hash-pinned in requirements/ and are
+# updated by hand together with the measurements they affect.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

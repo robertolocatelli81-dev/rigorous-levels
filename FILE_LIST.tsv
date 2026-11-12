@@ -83,3 +83,5 @@ src/rigorous_levels/_deterministic.py	62b9de82f35b3f64ef0d5f87c76f6770d295b4866a
 tests/test_determinism.py	46ce86b8e1b7d9f78e3cd1c124955fc4deff41528efc6f7c64f5bb21f0bb8794	new	-
 .github/workflows/release.yml	69739364a9782dd281e6eb03ba7a0ef96ecb34249b814b2e4553aa95f28c43aa	new	-
 requirements/build.txt	57a14d76b46d96e8e1b0dcaf5fda2e4d23658e5128fcae98c484f9346e749f18	new	-
+.github/CODEOWNERS	2b7ba13fdfb9133c6cd9de35eb72cd54fa31bbb077f0065b54d9b299487c2478	new	-
+.github/dependabot.yml	bdab339f6a179e49b0eb56d094d2aeb3c5127d84a04ee4861f8f6363286f84d1	new	-
