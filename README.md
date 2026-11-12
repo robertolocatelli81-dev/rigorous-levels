@@ -297,25 +297,25 @@ package, not the source tree). The sandbox tests run once per isolation engine w
 in a fresh interpreter and checks what it prints. `bench/matrix.sh VENV...` reproduces the CI matrix locally (stack
 default / unlimited / 1 MiB, engines present, bwrap absent, bwrap failing; fresh HOME per run).
 
-Measured on 2026-11-12 (03:01 CET) on the tree of commit f55a975 (before the macOS/Windows fixes of the same day)
-with `bench/matrix.sh` on the four venvs, each run against the
-package installed from the tree in a fresh temporary HOME, bwrap 0.8.0, podman 4.3.1 with the image
-`python:<minor>-slim` in the local store, wasmtime 50.0.1 (listed in `RIGOROUS_LEVELS_TRUSTED_ENGINES`) + CPython 3.15.2 WASI:
-20 of 20 runs OK, 340 tests each.
+Measured on 2026-11-12 (14:51–17:06 CET, system clock) on the tree of commit 5fc3941 (the commit after it changes only
+this paragraph) with `bench/matrix.sh` on the four venvs, each run against the package installed from the tree in a
+fresh temporary HOME, bwrap 0.8.0, podman 4.3.1 with the image `python:<minor>-slim` in the local store, wasmtime 50.0.1
+(listed in `RIGOROUS_LEVELS_TRUSTED_ENGINES`) + CPython 3.15.2 WASI, and `RIGOROUS_LEVELS_TARGETS_VENV` pointing at a
+venv with centrex-tlf 0.4.0: 20 of 20 runs OK, 374 tests each.
 
 | Python | numpy, scipy, python-flint | scqubits | stack default / unlimited / 1 MiB | bwrap hidden from PATH | fake bwrap (not root-owned) |
 |---|---|---|---|---|---|
-| 3.11.2 | 2.4.6, 1.17.1, 0.9.0 | 4.3.1 | OK, 65 skipped | OK, 84 skipped | OK, 84 skipped |
-| 3.12.15 | 2.5.4, 1.18.1, 0.9.0 | absent | OK, 79 skipped | OK, 98 skipped | OK, 98 skipped |
-| 3.13.15 | 2.5.4, 1.18.1, 0.9.0 | 4.3.1 | OK, 64 skipped | OK, 84 skipped | OK, 84 skipped |
-| 3.14.8 | 2.5.4, 1.18.1, 0.9.0 | absent | OK, 79 skipped | OK, 98 skipped | OK, 98 skipped |
+| 3.11.2 | 2.4.6, 1.17.1, 0.9.0 | 4.3.1 | OK, 62 skipped | OK, 84 skipped | OK, 84 skipped |
+| 3.12.15 | 2.5.4, 1.18.1, 0.9.0 | absent | OK, 76 skipped | OK, 98 skipped | OK, 98 skipped |
+| 3.13.15 | 2.5.4, 1.18.1, 0.9.0 | 4.3.1 | OK, 61 skipped | OK, 84 skipped | OK, 84 skipped |
+| 3.14.8 | 2.5.4, 1.18.1, 0.9.0 | absent | OK, 76 skipped | OK, 98 skipped | OK, 98 skipped |
 
 Every skip carries its reason: 19 each for the three engines absent on this machine (`docker`, `sandbox-exec`,
-`appcontainer`), 19 more for `bwrap` when it is hidden or fake (its probe fails: fail-closed), 3 for
-`test_port_centrex_tlf` without `RIGOROUS_LEVELS_TARGETS_VENV`, 1–3 for diatomic-py absent, 1 for the wasm solver test (no
-numpy under WASI), 1 for an interpreter under /usr (no piece to mount), and on 3.12/3.14 the scqubits tests and the
-README example (scqubits absent there). The bwrap, podman and wasm sandbox tests ran in every run where the engine
-was present (0 skipped for them).
+`appcontainer`); with `bwrap` hidden or fake, 19 more for its engine (its probe fails: fail-closed), 2 bwrap-only tests
+and the 3 `test_port_centrex_tlf` tests; 1–3 for diatomic-py absent, 1 for the wasm solver test (no numpy under WASI),
+1 on 3.11 for an interpreter under /usr (no piece to mount), and on 3.12/3.14 the scqubits tests and the README
+example (scqubits absent there). The bwrap, podman and wasm sandbox tests and the 4 centrex tests ran in every run
+where their engine was present (0 skipped for them).
 
 `python -m rigorous_levels.reproduce` re-measures the numerical claims of this file offline, one `[PASS]`/`[FAIL]` line per
 claim with the measured and the published value (fast set: 8.2 s on the author's machine; `--full` adds the
