@@ -367,7 +367,8 @@ Python 3.10–3.14, 161 tests each).
   the exit, not from the kernel: memory on sandbox-exec (macOS refuses RLIMIT_AS, RLIMIT_DATA and RLIMIT_RSS,
   measured in CI), the scratch disk on both, the CPU time on appcontainer next to the Job Object's own limit
   (Windows checks that one only periodically). A port can exceed a cap by what it does in one interval before it is
-  killed; files unlinked while open are not counted (docs/PORT_CONTRACT.md §6).
+  killed; files unlinked while open are not counted, and a child that leaves the process group (setsid) is neither
+  sampled nor killed (measured on Linux; docs/PORT_CONTRACT.md §6).
 - Adapter: the float floor is a plausible bound (16× the nominal tolerance of LAPACK ?stebz), not a proof.
 - Speed: see the table above.
 

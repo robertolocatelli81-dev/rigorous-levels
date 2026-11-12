@@ -39,7 +39,7 @@ import numpy as np
 
 from rigorous_levels._compat import add_field_aliases
 from rigorous_levels._deterministic import tridiagonal_lowest
-from rigorous_levels.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint
+from rigorous_levels.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint, _refuse_overflow
 
 __all__ = ["SphericalRotor", "guaranteed_sphere_levels", "transition", "OutOfDomain", "ArbMissing", "DeadlineExceeded"]
 
@@ -109,9 +109,16 @@ def _approximate(r: SphericalRotor, L: int, k: int) -> np.ndarray:
     solved by Sturm bisection in floats (_deterministic): the same numbers on every machine."""
     B, Dc, dE2 = Fraction(r.B), Fraction(r.Dc), Fraction(r.dE) ** 2
     M = abs(r.M)
-    d = [float(B * (N * (N + 1)) - Dc * (N * (N + 1)) ** 2) for N in range(M, L + 1)]
-    e2 = [float(dE2 * _c2(N, r.M)) for N in range(M, L)]
-    return np.array(tridiagonal_lowest(d, e2, k))
+    d = [B * (N * (N + 1)) - Dc * (N * (N + 1)) ** 2 for N in range(M, L + 1)]
+    e2 = [dE2 * _c2(N, r.M) for N in range(M, L)]
+    # exact power-of-two prescaling before rounding to floats: dE² (and the diagonal) may exceed the float range
+    # while the eigenvalues do not (NEMESIS 2026-11-12: B = dE = 1e200 gave a raw OverflowError)
+    bits = [x.numerator.bit_length() - x.denominator.bit_length() for x in d if x] + \
+           [(x.numerator.bit_length() - x.denominator.bit_length() + 1) // 2 for x in e2 if x]
+    ex = max(bits, default=0) + 1
+    d = [float(x / Fraction(2) ** ex) for x in d]
+    e2 = [float(x / Fraction(4) ** ex) for x in e2]
+    return np.array([math.ldexp(x, ex) for x in tridiagonal_lowest(d, e2, k)])   # OverflowError beyond float64
 
 
 def _ball(fl, x):
@@ -174,6 +181,7 @@ def _attempt(fl, r: SphericalRotor, k: int, width: float, L: int):
     return tuple(low), tuple(high), eta_f
 
 
+@_refuse_overflow
 def guaranteed_sphere_levels(r: SphericalRotor, k: int = 6, width: float = 1e-12, *,
                              deadline: Optional[float] = None, L_initial: Optional[int] = None,
                              L_limit: int = L_LIMIT, prec: int = PREC_MIN) -> Intervals:

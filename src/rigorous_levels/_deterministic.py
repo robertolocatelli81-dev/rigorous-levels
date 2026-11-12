@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import math
 from operator import mul
-from typing import Callable, Dict, List, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 EPS = 2.220446049250313e-16
 SAFMIN = 2.2250738585072014e-308
@@ -35,17 +35,28 @@ def _scale_exponent(values) -> int:
     square below the overflow threshold."""
     m = 0.0
     for v in values:
+        if not math.isfinite(v):                    # NaN too: max() would skip it in silence
+            raise OverflowError("an entry of the matrix is not finite")
         if abs(v) > m:
             m = abs(v)
     if m == 0.0:
         return 0
-    if not math.isfinite(m):
-        raise OverflowError("an entry of the matrix is not finite")
     return math.frexp(m)[1]
 
 
 def _fsum_dot(a: Sequence[float], b: Sequence[float]) -> float:
     return math.fsum(map(mul, a, b))
+
+
+def _checked(count: Callable[[float], int], check: Optional[Callable[[], None]]) -> Callable[[float], int]:
+    """count with the caller's deadline check before each evaluation (the check raises; it changes no number)."""
+    if check is None:
+        return count
+
+    def c(x: float) -> int:
+        check()
+        return count(x)
+    return c
 
 
 def _bisect_lowest(count: Callable[[float], int], k: int, lo: float, hi: float, atol: float,
@@ -105,7 +116,8 @@ def _pivmin(e2: Sequence[float]) -> float:
     return SAFMIN * m
 
 
-def tridiagonal_lowest(d: Sequence[float], e2: Sequence[float], k: int, first: int = 0) -> List[float]:
+def tridiagonal_lowest(d: Sequence[float], e2: Sequence[float], k: int, first: int = 0,
+                       check: Optional[Callable[[], None]] = None) -> List[float]:
     """λ_first … λ_{k−1} (the lowest first) of the symmetric tridiagonal (d, squared off-diagonal e2), bisection on
     the Sturm count."""
     d = [float(x) for x in d]
@@ -129,13 +141,23 @@ def tridiagonal_lowest(d: Sequence[float], e2: Sequence[float], k: int, first: i
     atol = SAFMIN * max(scale, 1.0)               # bisect to adjacent floats (relative accuracy where the matrix allows it)
     pad = atol + 2.0 * EPS * scale * n
     pivmin = _pivmin(e2)
-    out = _bisect_lowest(lambda x: sturm_count(d, e2, x, pivmin), k, lo - pad, hi + pad, atol, first)
+    out = _bisect_lowest(_checked(lambda x: sturm_count(d, e2, x, pivmin), check), k, lo - pad, hi + pad, atol, first)
     return [math.ldexp(x, ex) for x in out]                # ldexp raises OverflowError beyond float64
 
 
 def householder_tridiagonal(A: Sequence[Sequence[float]]):
     """(d, e2): diagonal and squared off-diagonal of Qᵀ A Q tridiagonal (A symmetric, dense, float). Householder
-    reflections H = I − v vᵀ·2/‖v‖² column by column; each column is scaled by its largest |entry| first."""
+    reflections H = I − v vᵀ·2/‖v‖² column by column; each column is scaled by its largest |entry| first. e2 holds
+    squares: OverflowError if an off-diagonal entry is beyond √(float max) ≈ 1.3e154 (dense_lowest never unscales them)."""
+    d, e2, ex = _householder_scaled(A)
+    if ex != 0:
+        d = [math.ldexp(x, ex) for x in d]
+        e2 = [math.ldexp(x, 2 * ex) for x in e2]
+    return d, e2
+
+
+def _householder_scaled(A: Sequence[Sequence[float]], check: Optional[Callable[[], None]] = None):
+    """(d, e2, ex): the tridiagonal of A·2^−ex (exact power-of-two scaling, entries of A·2^−ex below 1)."""
     n = len(A)
     S = [[float(x) for x in row] for row in A]
     ex = _scale_exponent(x for row in S for x in row)
@@ -144,6 +166,8 @@ def householder_tridiagonal(A: Sequence[Sequence[float]]):
     d = [0.0] * n
     e2 = [0.0] * max(n - 1, 0)
     for k in range(n - 2):
+        if check is not None:
+            check()
         x = [S[i][k] for i in range(k + 1, n)]
         s = 0.0
         for t in x:
@@ -178,16 +202,15 @@ def householder_tridiagonal(A: Sequence[Sequence[float]]):
         d[n - 2] = S[n - 2][n - 2]
         e2[n - 2] = S[n - 1][n - 2] * S[n - 1][n - 2]
     d[n - 1] = S[n - 1][n - 1]
-    if ex != 0:
-        d = [math.ldexp(x, ex) for x in d]
-        e2 = [math.ldexp(x, 2 * ex) for x in e2]
-    return d, e2
+    return d, e2, ex
 
 
-def dense_lowest(A: Sequence[Sequence[float]], k: int) -> List[float]:
-    """The k lowest eigenvalues of the dense symmetric float matrix A (Householder, then Sturm bisection)."""
-    d, e2 = householder_tridiagonal(A)
-    return tridiagonal_lowest(d, e2, k)
+def dense_lowest(A: Sequence[Sequence[float]], k: int, check: Optional[Callable[[], None]] = None) -> List[float]:
+    """The k lowest eigenvalues of the dense symmetric float matrix A (Householder, then Sturm bisection), computed
+    on A·2^−ex and scaled back exactly: the squared off-diagonal never leaves the scaled range (entries up to the
+    float max; before 2026-11-12 (NEMESIS) e2 was unscaled first and overflowed beyond ≈ 1.3e154)."""
+    d, e2, ex = _householder_scaled(A, check)
+    return [math.ldexp(x, ex) for x in tridiagonal_lowest(d, e2, k, check=check)]    # ldexp raises OverflowError beyond float64
 
 
 def band_count(diag: Sequence[float], bands: Dict[int, Sequence[float]], w: int, x: float, pivmin: float) -> int:
@@ -223,7 +246,8 @@ def band_count(diag: Sequence[float], bands: Dict[int, Sequence[float]], w: int,
     return c
 
 
-def band_lowest(diag: Sequence[float], bands: Dict[int, Sequence[float]], k: int) -> List[float]:
+def band_lowest(diag: Sequence[float], bands: Dict[int, Sequence[float]], k: int,
+                check: Optional[Callable[[], None]] = None) -> List[float]:
     """The k lowest eigenvalues of the symmetric band matrix (diag, bands[m][i] = A[i, i+m]); tridiagonal bands go to
     the Sturm path."""
     diag = [float(x) for x in diag]
@@ -234,10 +258,10 @@ def band_lowest(diag: Sequence[float], bands: Dict[int, Sequence[float]], k: int
     if ex != 0:                                     # exact power-of-two scaling, undone exactly at the end
         diag = [math.ldexp(x, -ex) for x in diag]
         bands = {m: [math.ldexp(x, -ex) for x in b] for m, b in bands.items()}
-        return [math.ldexp(x, ex) for x in band_lowest(diag, bands, k)]    # ldexp raises OverflowError beyond float64
+        return [math.ldexp(x, ex) for x in band_lowest(diag, bands, k, check)]    # ldexp raises OverflowError beyond float64
     if w <= 1:
         b1 = bands.get(1, [0.0] * (n - 1))
-        return tridiagonal_lowest(diag, [x * x for x in b1], k)
+        return tridiagonal_lowest(diag, [x * x for x in b1], k, check=check)
     lo, hi = math.inf, -math.inf
     for i in range(n):
         r = 0.0
@@ -259,7 +283,7 @@ def band_lowest(diag: Sequence[float], bands: Dict[int, Sequence[float]], k: int
             if v * v > big:
                 big = v * v
     pivmin = SAFMIN * big
-    return _bisect_lowest(lambda x: band_count(diag, bands, w, x, pivmin), k, lo - pad, hi + pad, atol)
+    return _bisect_lowest(_checked(lambda x: band_count(diag, bands, w, x, pivmin), check), k, lo - pad, hi + pad, atol)
 
 
 def _start_vector(n: int) -> List[float]:
@@ -272,10 +296,12 @@ def _start_vector(n: int) -> List[float]:
     return out
 
 
-def band_eigenvector(diag: Sequence[float], bands: Dict[int, Sequence[float]], lam: float, iterations: int = 3) -> List[float]:
+def band_eigenvector(diag: Sequence[float], bands: Dict[int, Sequence[float]], lam: float, iterations: int = 3,
+                     check: Optional[Callable[[], None]] = None) -> List[float]:
     """Unit eigenvector estimate for the eigenvalue estimate `lam`: inverse iteration with (A − lam·I) factored by
     banded Gaussian elimination with partial pivoting (the right-hand side follows the same row operations), from a
-    fixed start vector; sign fixed so that the entry of largest |value| (first such index) is > 0."""
+    fixed start vector; sign fixed so that the entry of largest |value| is > 0 (on a tie, the first such index:
+    the antisymmetric levels of a symmetric rotor have exact ties, so this rule fixes published signs)."""
     diag = [float(x) for x in diag]
     n = len(diag)
     bands = {m: [float(x) for x in b] for m, b in bands.items() if m >= 1 and any(x != 0 for x in b)}
@@ -296,6 +322,8 @@ def band_eigenvector(diag: Sequence[float], bands: Dict[int, Sequence[float]], l
     tiny = EPS * norm if norm > 0 else SAFMIN
     steps = []                                   # (pivot row chosen, [(row, multiplier)])
     for c in range(n):
+        if check is not None and c % 256 == 0:
+            check()
         best, bi = -1.0, c
         for i in range(c, min(n, c + w + 1)):
             v = abs(rows[i].get(c, 0.0))

@@ -130,7 +130,10 @@ memory watchdog reads this process (libproc `proc_pid_rusage`). The man page mar
 processes are the runner's rlimits; macOS refuses RLIMIT_AS ("current limit exceeds maximum limit", CI 2026-11-12),
 so the memory cap is the host watchdog (`RIGOROUS_LEVELS_HOST_LIMITS=memory`: max of resident size and physical footprint of
 the process group), and the scratch folder (on disk, not a tmpfs) is capped by the watchdog. The run is a new process
-group, killed whole at the end.
+group, killed whole at the end. A child that leaves the group (`setsid`) is neither sampled nor killed by the watchdog:
+measured on Linux with the same function (`run_watched`, 2026-11-12), such a child kept 311 MiB resident after the run
+returned with no reason. On macOS a child needs `fork`, and the runner's RLIMIT_NPROC = 16 counts every process of the
+user; whether a fork succeeds there is not measured.
 
 6.4 `appcontainer` (Windows): AppContainer profile `rigorous-levels-multiport` (CreateAppContainerProfile, SID reused if it
 exists); read-execute grants (`icacls … /grant *<SID>:(OI)(CI)RX`) on the interpreter prefix, the site-packages and

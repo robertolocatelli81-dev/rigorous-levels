@@ -36,7 +36,8 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 
 from rigorous_levels._deterministic import band_eigenvector, band_lowest
-from rigorous_levels.guaranteed_intervals import GUARANTEED, Intervals, OutOfDomain, guaranteed_levels
+from rigorous_levels.guaranteed_intervals import (GUARANTEED, _ESTIMATE_DEADLINE, Intervals, OutOfDomain, _estimate_check,
+                                                 guaranteed_levels)
 from rigorous_levels.rotor_spectrum import InputRejected, Rotor
 
 __all__ = ["MatrixElement", "guaranteed_matrix_element", "OutOfDomain"]
@@ -83,15 +84,16 @@ def _sqrt_lower(x: Fraction) -> Fraction:
 def _vectors(r: Rotor, N: int, k: int):
     """Float eigenvectors of H_N, as dicts n -> Fraction (exact values of the float entries): bisection estimates of
     the k lowest eigenvalues, then inverse iteration, in floats that are the same on every machine (_deterministic:
-    no BLAS/LAPACK; sign fixed by the largest entry > 0). They enter the bound only through the exact residual."""
+    no BLAS/LAPACK; sign fixed by the largest entry > 0, the first one on a tie). They enter the bound only through the exact residual."""
     EC, ng = Fraction(r.E_C), Fraction(r.n_g)
     ns = range(-N, N + 1)
     dim = 2 * N + 1
     diag = [float(4 * EC * (n - ng) ** 2) for n in ns]
     bands = {m: [c / 2.0] * (dim - m) for m, c in r.cosines if c != 0.0 and m < dim}
     out = []
-    for lam in band_lowest(diag, bands, k):
-        v = band_eigenvector(diag, bands, lam)
+    check = _estimate_check()
+    for lam in band_lowest(diag, bands, k, check):
+        v = band_eigenvector(diag, bands, lam, check=check)
         out.append({n: Fraction(x) for n, x in zip(ns, v) if x != 0.0})
     return out
 
@@ -153,7 +155,11 @@ def guaranteed_matrix_element(r: Rotor, i: int, j: int, operator: str = "n", m: 
         iv = guaranteed_levels(r, kk, width, deadline=deadline)
     except InputRejected as e:
         raise OutOfDomain(str(e)) from None
-    vecs = _vectors(r, iv.N, kk)
+    tok = _ESTIMATE_DEADLINE.set(None if deadline is None else t0 + deadline)
+    try:
+        vecs = _vectors(r, iv.N, kk)
+    finally:
+        _ESTIMATE_DEADLINE.reset(tok)
     EC = Fraction(r.E_C)
     normV = sum(abs(Fraction(c)) for _, c in r.cosines)
     sin_b, gaps, eps, errs = [], [], [], []

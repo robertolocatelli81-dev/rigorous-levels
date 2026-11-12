@@ -242,5 +242,108 @@ class TestEstimators(unittest.TestCase):
         self.assertEqual(D.tridiagonal_lowest(d, e2, 6, first=5), D.tridiagonal_lowest(d, e2, 6)[5:])
 
 
+
+class TestNemesisDelta20261112(unittest.TestCase):
+    """Rilievi NEMESIS 12/11/2026 sul delta 36c574d..4e44e10: ognuno fallisce sul codice di 4e44e10."""
+
+    def test_dense_and_sphere_far_from_one(self):
+        """e2 (quadrati) riscalato fuori dalla scala: B = dE = 1e200 dava OverflowError grezzo (molecola, sfera) o
+        OutOfDomain (fluxonium 1e160), dove LAPACK (36c574d) dava GUARANTEED."""
+        from rigorous_levels import _deterministic as D
+        got = D.dense_lowest([[1e200, 1e200], [1e200, 1e200]], 2)
+        self.assertLess(abs(got[0]), 1e186)
+        self.assertLess(abs(got[1] - 2e200) / 2e200, 1e-14)
+        if not FLINT:
+            self.skipTest("python-flint absent")
+        from rigorous_levels.hyperfine_molecule import SigmaMolecule, guaranteed_molecule_levels
+        from rigorous_levels.spherical_rotor import SphericalRotor, guaranteed_sphere_levels
+        from rigorous_levels.fluxonium import Fluxonium, guaranteed_fluxonium_levels
+        self.assertEqual(guaranteed_molecule_levels(SigmaMolecule(3, 3, B=1e200, dE=1e200), 0, 2, deadline=120).state,
+                         "GUARANTEED")
+        self.assertEqual(guaranteed_sphere_levels(SphericalRotor(1e200, 1e200, 0), 2, deadline=120).state, "GUARANTEED")
+        self.assertEqual(guaranteed_fluxonium_levels(Fluxonium(1e160, 1e160, 1e160), 2, 1e150, deadline=120).state,
+                         "GUARANTEED")
+
+    def test_overflow_is_a_refusal_in_every_module(self):
+        """README: «anything else is OutOfDomain or InputRejected»; sfera e molecola davano OverflowError grezzo."""
+        if not FLINT:
+            self.skipTest("python-flint absent")
+        from rigorous_levels.guaranteed_intervals import OutOfDomain
+        from rigorous_levels.hyperfine_molecule import SigmaMolecule, guaranteed_molecule_levels
+        from rigorous_levels.spherical_rotor import SphericalRotor, guaranteed_sphere_levels
+        with self.assertRaises(OutOfDomain):
+            guaranteed_sphere_levels(SphericalRotor(1.7e308, 1.7e308, 0), 2, deadline=60)
+        with self.assertRaises(OutOfDomain):
+            guaranteed_molecule_levels(SigmaMolecule(3, 3, B=1.7e308, c1=1.7e308), 0, 2, deadline=60)
+
+    def test_not_finite_entry_refused(self):
+        from rigorous_levels import _deterministic as D
+        for bad in (float("nan"), float("inf")):
+            with self.assertRaises(OverflowError):
+                D.dense_lowest([[1.0, bad], [bad, 1.0]], 1)
+            with self.assertRaises(OverflowError):
+                D.tridiagonal_lowest([bad, 1.0], [1.0], 1)
+
+    def test_sign_on_a_tie_is_the_first_index(self):
+        """Gli autovettori antisimmetrici di un rotore simmetrico hanno parità esatte (73 casi misurati): la regola
+        «primo indice» decide il segno pubblicato (mutante «ultimo indice» vivo prima)."""
+        from rigorous_levels.matrix_elements import _vectors
+        from rigorous_levels.rotor_spectrum import Rotor
+        v = _vectors(Rotor.transmon(1.0, 0.5, 0.0), 10, 3)[1]           # antisymmetric: |v(−1)| == |v(1)| exactly
+        self.assertEqual(abs(v[-1]), abs(v[1]))
+        self.assertEqual(max(abs(x) for x in v.values()), abs(v[1]))
+        self.assertGreater(v[-1], 0)
+        self.assertLess(v[1], 0)
+        if not FLINT:
+            self.skipTest("python-flint absent")
+        from rigorous_levels.matrix_elements import guaranteed_matrix_element
+        me = guaranteed_matrix_element(Rotor.transmon(1.0, 0.5, 0.0), 0, 1, "n", 1)
+        self.assertLess(me.high, 0)
+
+    def test_phi_zpf_is_two_square_roots(self):
+        """x**0.25 (pow di libm) e √√x differiscono nell'ultimo bit per 2E_C/E_L = 763.774855201995."""
+        from rigorous_levels.fluxonium import Fluxonium
+        self.assertEqual(Fluxonium(381.8874276009975, 1.0, 1.0).phi_zpf, 5.257040697542432)
+
+    def test_estimates_honour_the_deadline(self):
+        """Le stime in Python puro non controllavano la scadenza: deadline = 2 s finiva dopo 212 s (N = 4000, cos 1…24φ;
+        con LAPACK, 36c574d: 8,4 s). Il controllo non cambia nessun numero (hash invariato)."""
+        import time
+        from rigorous_levels import _deterministic as D
+        calls = []
+
+        class Stop(Exception):
+            pass
+
+        def check():
+            calls.append(1)
+            if len(calls) > 3:
+                raise Stop
+        n = 41
+        d = [float(i) for i in range(n)]
+        with self.assertRaises(Stop):
+            D.band_lowest(d, {1: [0.5] * (n - 1), 2: [0.25] * (n - 2)}, 5, check)
+        calls.clear()
+        with self.assertRaises(Stop):
+            D.tridiagonal_lowest(d, [0.25] * (n - 1), 5, check=check)
+        calls.clear()
+        with self.assertRaises(Stop):
+            D.dense_lowest([[float(i == j) * i + 0.1 for j in range(n)] for i in range(n)], 5, check)
+        self.assertEqual(D.band_lowest(d, {2: [0.25] * (n - 2)}, 5, lambda: None), D.band_lowest(d, {2: [0.25] * (n - 2)}, 5))
+        if not FLINT:
+            self.skipTest("python-flint absent")
+        from rigorous_levels.guaranteed_intervals import DeadlineExceeded, guaranteed_levels
+        from rigorous_levels.rotor_spectrum import Rotor
+        t = time.perf_counter()
+        with self.assertRaises(DeadlineExceeded):
+            guaranteed_levels(Rotor(1.0, {m: -1.0 for m in range(1, 25)}), 6, deadline=1.0, N_initial=4000, N_limit=4000)
+        self.assertLess(time.perf_counter() - t, 30.0)
+
+    def test_molecule_entries_use_fsum(self):
+        """sum() dei float è ingenuo fino a Python 3.11: il mutante fsum → sum era vivo."""
+        from fractions import Fraction
+        from rigorous_levels.hyperfine_molecule import _float_of
+        self.assertEqual(_float_of([(Fraction(10 ** 16), 1), (Fraction(1), 1), (Fraction(-10 ** 16), 1)]), 1.0)
+
 if __name__ == "__main__":
     unittest.main()

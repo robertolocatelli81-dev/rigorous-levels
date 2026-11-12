@@ -23,6 +23,7 @@ on Arb/FLINT and on this code. This package is not an external validator.
 """
 from __future__ import annotations
 
+import contextvars
 import math
 import time
 from dataclasses import dataclass
@@ -198,11 +199,32 @@ def _float_bands(diag, bande) -> Tuple[List[float], Dict[int, List[float]]]:
     return [float(d) for d in diag], {m: [float(b)] * (n - m) for m, b in bande.items() if m < n}
 
 
+# Absolute time.perf_counter() deadline of the public call in progress, read by the float estimators (pure Python
+# since 0.3.0: without a check they ran for minutes past `deadline`). A context variable keeps the private signatures.
+_ESTIMATE_DEADLINE: "contextvars.ContextVar[Optional[float]]" = contextvars.ContextVar("rigorous_levels_estimate_deadline",
+                                                                                     default=None)
+
+
+def _deadline_check(deadline: Optional[float]):
+    """None, or a function raising DeadlineExceeded once time.perf_counter() passes `deadline` (absolute)."""
+    if deadline is None:
+        return None
+
+    def check():
+        if time.perf_counter() > deadline:
+            raise DeadlineExceeded("deadline exceeded during the float estimates")
+    return check
+
+
+def _estimate_check():
+    return _deadline_check(_ESTIMATE_DEADLINE.get())
+
+
 def _float_estimates(diag, bande, k: int) -> np.ndarray:
     """The k lowest eigenvalues of the band matrix, in floats that are the same on every machine (_deterministic:
     no BLAS/LAPACK; the array only holds them). Only to choose points: they enter no bound."""
     d, b = _float_bands(diag, bande)
-    return np.array(band_lowest(d, b, k))
+    return np.array(band_lowest(d, b, k, _estimate_check()))
 
 
 def _first_order_shift(diag_su, diag_giu, bande, k: int) -> float:
@@ -212,8 +234,9 @@ def _first_order_shift(diag_su, diag_giu, bande, k: int) -> float:
     d, b = _float_bands(diag_su, bande)
     dd = [float(a - c) for a, c in zip(diag_su, diag_giu)]
     best = 0.0
-    for lam in band_lowest(d, b, k):
-        v = band_eigenvector(d, b, lam)
+    check = _estimate_check()
+    for lam in band_lowest(d, b, k, check):
+        v = band_eigenvector(d, b, lam, check=check)
         x = math.fsum(vi * vi * di for vi, di in zip(v, dd) if di != 0.0)
         if x > best:
             best = x
@@ -333,6 +356,16 @@ def guaranteed_levels(r, k: int = 6, width: float = 1e-12, *, deadline: Optional
                       N_initial: Optional[int] = None, N_limit: int = N_LIMIT, prec: int = PREC_MIN) -> Intervals:
     """First k levels of H as guaranteed intervals. `width` is the target width (GHz, or the unit of E_C);
     `deadline` is a time in seconds after which DeadlineExceeded is raised (cooperative check)."""
+    tok = _ESTIMATE_DEADLINE.set(time.perf_counter() + float(deadline)
+                                 if isinstance(deadline, (int, float)) and not isinstance(deadline, bool)
+                                 and _finite(deadline) and deadline >= 0 else None)
+    try:
+        return _guaranteed_levels(r, k, width, deadline=deadline, N_initial=N_initial, N_limit=N_limit, prec=prec)
+    finally:
+        _ESTIMATE_DEADLINE.reset(tok)
+
+
+def _guaranteed_levels(r, k, width, *, deadline, N_initial, N_limit, prec) -> Intervals:
     check_domain(r, k)
     if isinstance(width, bool) or not isinstance(width, (int, float)) or not _finite(width) or width <= 0:
         raise OutOfDomain("width must be a finite number > 0")

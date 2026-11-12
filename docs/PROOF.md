@@ -79,7 +79,7 @@ Since then every estimate comes from `rigorous_levels._deterministic`, which use
 IEEE 754 fixes bit for bit (+, −, ×, ÷, comparisons, `math.sqrt`, `math.fsum`, `math.ldexp`/`frexp`, `float()` of an
 int or a Fraction) in a fixed order: bisection on the Sturm count (tridiagonal), Householder reduction then the same
 bisection (dense), bisection on the LDLᵀ inertia (band), inverse iteration with banded partial pivoting from a fixed
-start vector (eigenvectors; sign fixed by the largest entry). No BLAS/LAPACK, no libm transcendental, no builtin
+start vector (eigenvectors; sign fixed by the largest entry, the first one on a tie). No BLAS/LAPACK, no libm transcendental, no builtin
 `sum()` of floats (its algorithm changed in Python 3.12). The other float decisions (initial cut, basis growth, α)
 use the same operations. Hence the ends depend only on the inputs, on this code and on python-flint (Arb's balls).
 

@@ -301,7 +301,7 @@ sphere and Mathieu cases of the probe happened to agree.
 
 - New `qraft_ra._deterministic`: eigenvalue estimates by bisection on the Sturm count (tridiagonal), Householder then
   the same bisection (dense), bisection on the LDLᵀ inertia (band), and eigenvectors by inverse iteration with banded
-  partial pivoting from a fixed start vector (sign fixed by the largest entry), using only Python float operations
+  partial pivoting from a fixed start vector (sign fixed by the largest entry, the first one on a tie), using only Python float operations
   whose result IEEE 754 fixes (+ − × ÷, `math.sqrt`, `math.fsum`, `ldexp`/`frexp`, `float()` of an int or a Fraction)
   in a fixed order. No BLAS/LAPACK, no libm transcendental, no builtin `sum()` of floats (changed in Python 3.12).
 - Every guaranteed module uses it: `guaranteed_intervals` (estimates and the first-order filter of the basis growth),
@@ -337,6 +337,25 @@ sphere and Mathieu cases of the probe happened to agree.
 Also: `bench/readme_numbers.py` stopped with AssertionError on the state OK_FLOAT_FLOOR (added in 0.3.0) and counted
 it as a flag; it now accepts it as an OK state. The watchdog test of the multiport expected the exact size the host
 watchdog samples during a 6 MiB write ("6 MiB"); under load it saw 5 MiB: the test now accepts 4–6 MiB.
+
+### Fixed before release (adversarial review of the determinism delta, 2026-11-12)
+
+- Dense and sphere estimates far from 1: `householder_tridiagonal` returned the squared off-diagonal scaled back to the
+  input's scale before the bisection rescaled it, so an entry beyond ≈ 1.3e154 overflowed; the sphere squared dE in
+  floats. Measured on 4e44e10: molecule B = dE = 1e160 and 1e200, sphere B = dE = 1e200 stopped with a raw
+  OverflowError, fluxonium E_C = E_J = E_L = 1e160 with OutOfDomain, where the LAPACK estimates of 36c574d gave
+  GUARANTEED. Now `dense_lowest` bisects the scaled tridiagonal and the sphere prescales its exact entries by a power
+  of two: the same floats as before wherever nothing overflowed (determinism hash unchanged).
+- Deadline: the pure-Python estimates ran without the cooperative deadline check (LAPACK took milliseconds there):
+  `guaranteed_levels` with cos φ…cos 24φ at N = 4000 and `deadline=2` stopped after 212 s (8.4 s on 36c574d), cos φ…cos
+  8φ at n_g = 900.2 after 17.3 s (8.1 s). The estimators now take the caller's check before every count, every
+  Householder column and every 256 eliminated columns: 2.0–2.1 s in the three cases; no number changes.
+- `guaranteed_sphere_levels` and `guaranteed_molecule_levels` turn an OverflowError into OutOfDomain like the other
+  guaranteed entry points (B = dE = 1.7e308 crashed, before this release too); a NaN entry is refused like an
+  infinite one.
+- Tests for four live mutants: the tie rule of the eigenvector sign (antisymmetric levels of a symmetric rotor tie
+  exactly: the rule fixes the published sign of ⟨0|n|1⟩), φ_zpf by two square roots, `math.fsum` in the molecule
+  entries (killed on Python ≤ 3.11, where `sum` is not compensated), the finiteness check.
 
 ## 0.2.0 — 2026-11-11 (local, unreleased)
 

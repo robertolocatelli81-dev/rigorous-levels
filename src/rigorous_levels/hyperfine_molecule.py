@@ -53,7 +53,8 @@ import numpy as np
 
 from rigorous_levels._compat import add_field_aliases
 from rigorous_levels._deterministic import dense_lowest
-from rigorous_levels.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint
+from rigorous_levels.guaranteed_intervals import (ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _ESTIMATE_DEADLINE,
+                                                 _estimate_check, _flint, _refuse_overflow)
 
 __all__ = ["SigmaMolecule", "guaranteed_molecule_levels", "transition", "sector_dimension", "zeeman_hz",
            "OutOfDomain", "ArbMissing", "DeadlineExceeded"]
@@ -482,7 +483,7 @@ def _approximate(states, el, k: int) -> np.ndarray:
     M = [[0.0] * n for _ in range(n)]
     for (i, j), t in el.items():
         M[i][j] = M[j][i] = _float_of(t)
-    return np.array(dense_lowest(M, k))
+    return np.array(dense_lowest(M, k, _estimate_check()))
 
 
 def _attempt(fl, m: SigmaMolecule, dMF: int, k: int, width: float, L: int, dl):
@@ -514,7 +515,11 @@ def _attempt(fl, m: SigmaMolecule, dMF: int, k: int, width: float, L: int, dl):
         diagA = list(diag)
         for i in rows:
             diagA[i] = diag[i] - eta
-    approx = _approximate(states[:n_in], {ij: t for ij, t in el.items() if ij[1] < n_in}, k)
+    tok = _ESTIMATE_DEADLINE.set(dl)
+    try:
+        approx = _approximate(states[:n_in], {ij: t for ij, t in el.items() if ij[1] < n_in}, k)
+    finally:
+        _ESTIMATE_DEADLINE.reset(tok)
     low, high = [], []
     for j in range(k):
         delta = max(abs(float(approx[j])), m.B) * width / 4
@@ -541,6 +546,7 @@ def _arb_frac(fl, f: Fraction):
     return fl.arb(fl.fmpq(f.numerator, f.denominator))
 
 
+@_refuse_overflow
 def guaranteed_molecule_levels(m: SigmaMolecule, two_MF: int, k: int = 4, width: float = 1e-12, *,
                                deadline: Optional[float] = None, L_initial: Optional[int] = None,
                                L_limit: int = L_LIMIT, prec: int = PREC_MIN) -> Intervals:

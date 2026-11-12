@@ -39,7 +39,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from rigorous_levels._deterministic import dense_lowest
-from rigorous_levels.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _flint, _refuse_overflow
+from rigorous_levels.guaranteed_intervals import ArbMissing, DeadlineExceeded, Intervals, OutOfDomain, _deadline_check, _flint, _refuse_overflow
 from rigorous_levels.hyperfine_molecule import _count_below_banded
 
 __all__ = ["Fluxonium", "guaranteed_fluxonium_levels", "cos_matrix", "OutOfDomain", "ArbMissing", "DeadlineExceeded"]
@@ -185,7 +185,7 @@ def _attempt(fl, f: Fluxonium, k: int, width: float, N: int, N2: int, dl: Option
     diagB = [diag[i] - r[i] for i in range(N)]
     off = {(i, j): -EJa * C[i, j] for i in range(N) for j in range(i)}
     A = [[float(diag[i]) if i == j else float(-EJa * C[i, j]) for j in range(N)] for i in range(N)]
-    approx = dense_lowest(A, k)                                      # same floats on every machine (_deterministic)
+    approx = dense_lowest(A, k, _deadline_check(dl))                                      # same floats on every machine (_deterministic)
     low, high = [], []
     for j in range(k):
         delta = width / 4
