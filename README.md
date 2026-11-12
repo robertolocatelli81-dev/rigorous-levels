@@ -129,6 +129,8 @@ max(|a|, 1) for Mathieu; absolute 1e-10 GHz for the fluxonium); `WIDE` means val
 ## Install and use
 
 ```sh
+pip install --extra-index-url https://robertolocatelli81-dev.github.io/pypi/ rigorous-levels   # the release wheel, sha256-checked by pip
+# or, from a clone of this repository:
 pip install .                  # numpy, scipy, python-flint, sympy
 pip install ".[scqubits]"      # also the scqubits adapter
 pip install ".[porte]"         # scqubits, diatomic-py, SQcircuit, pyEPR-quantum, centrex-tlf (ports of the multiport)
@@ -141,7 +143,8 @@ plus a CPython built for WASI in `RIGOROUS_LEVELS_PYTHON_WASM` (pure-Python port
 every engine binary must be owned by root and not writable by group or others; a binary you installed yourself (for
 example wasmtime unpacked in your home) is used only if you list its exact real path in `RIGOROUS_LEVELS_TRUSTED_ENGINES` (an
 entry that is relative, a symlink or not normalized vouches for nothing), and `Output.sandbox` then names it.
-Not on PyPI.
+Not on PyPI: the wheel and the sdist are attached to the GitHub release and listed with their sha256 in the
+author's static package index (PEP 503) above.
 
 ```python
 from rigorous_levels import Rotor, guaranteed_levels, scqubits_spectrum, spectrum
@@ -374,7 +377,9 @@ Python 3.10–3.14, 161 tests each).
 
 ## Provenance
 
-There is no release yet. `FILE_LIST.tsv` lists every file with its sha256 and, for the modules derived from the
+Release v0.3.0 (2026-11-12): the wheel, the sdist and `SHA256SUMS` are built by `.github/workflows/release.yml` from the
+signed tag, with hash-pinned build tools, and carry a build-provenance attestation
+(`gh attestation verify <file> --repo robertolocatelli81-dev/rigorous-levels`). `FILE_LIST.tsv` lists every file with its sha256 and, for the modules derived from the
 author's repository, the sha256 of the source file; `python check_tree.py` checks the list, the imports, a deny-list
 and runs gitleaks.
 

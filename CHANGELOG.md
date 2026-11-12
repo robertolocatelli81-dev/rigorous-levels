@@ -1,8 +1,9 @@
 # Changelog
 
-All dates are from the author's system clock (Europe/Rome). Nothing here is published yet: no release, no PyPI.
+All dates are from the author's system clock (Europe/Rome). Releases: 0.3.0 on 2026-11-12 (GitHub release with attested wheel and sdist; not on PyPI). 0.1.0 and 0.2.0 were never
+released.
 
-## 0.3.0 — 2026-11-11 (local, unreleased; branch dev-0.3 from 7beff99)
+## 0.3.0 — 2026-11-12 (first release; developed on branch dev-0.3 from 7beff99 since 2026-11-11)
 
 ### Name (2026-11-12)
 

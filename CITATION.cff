@@ -3,7 +3,7 @@ message: "If you use rigorous-levels, cite it as below. Nothing here is a third-
 title: "rigorous-levels: guaranteed eigenvalue intervals for the charge-basis rotor, the spherical rotor, the 1Σ molecule, the Mathieu characteristic values and the fluxonium, with a sandboxed multiport for external solvers"
 type: software
 version: 0.3.0
-date-released: "2026-11-11"
+date-released: "2026-11-12"
 license: Apache-2.0
 authors:
   - family-names: Locatelli
