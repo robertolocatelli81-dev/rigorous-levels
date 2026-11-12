@@ -318,10 +318,10 @@ README example (scqubits absent there). The bwrap, podman and wasm sandbox tests
 was present (0 skipped for them).
 
 `python -m qraft_ra.reproduce` re-measures the numerical claims of this file offline, one `[PASS]`/`[FAIL]` line per
-claim with the measured and the published value (fast set: 22 s on the author's machine; `--full` adds the
-40 025-value Mathieu grid and the 200 wide-range transmons: 108 s); `--sabotage` makes the Mathieu solver return the next order of
+claim with the measured and the published value (fast set: 8.2 s on the author's machine; `--full` adds the
+40 025-value Mathieu grid and the 200 wide-range transmons: 105 s); `--sabotage` makes the Mathieu solver return the next order of
 the sector and must show at least one `[FAIL]` (positive control); `--readme` checks that every published value appears verbatim here and
-is run by `python check_tree.py`, so a number edited by hand fails the tree check. Measured on 2026-11-11 on this
+is run by `python check_tree.py`, so a number edited by hand fails the tree check. Measured on 2026-11-12 on this
 tree: fast set 9 of 9 PASS (the 2 slow claims print `[SLOW]` and run only with `--full`), `--full` 11 of 11,
 `--sabotage` 2 FAIL (a_0(1) and a_11(299), the latter returning scipy's wrong 232.195; exit 0).
 
@@ -337,13 +337,16 @@ strings (python-flint 0.9.0) and recomputes a set of intervals in fresh interpre
 Measured on 2026-11-12: `4d7d61cd2a17bd25f2a674a122436b2850800ef36927d9208c31cfd0bae3d403` on Python 3.11.2,
 3.12.15, 3.13.15 and 3.14.8, each with `OPENBLAS_CORETYPE` unset, Haswell, Prescott and Nehalem (16 of 16), Linux
 x86-64; a seeded probe of 309 inputs over all guaranteed modules gave identical strings under the three kernels and on
-Python 3.12 and 3.14 (on f9867d8: 29 of 309 differed under Prescott). Assumed, not tested: binary64 round-to-nearest
-without flush-to-zero in the process.
+Python 3.12 and 3.14 (on f9867d8: 29 of 309 differed under Prescott). In CI run 43177561844 (commit 22a5b37,
+2026-11-12) all 16 jobs printed `4d7d61cd2a17…`: Linux x86-64 (3.10–3.14, three stack sizes), Linux ARM64, macOS
+(Accelerate), Windows and free-threaded 3.14t; the cross-kernel test ran on Linux x86-64, Windows and 3.14t and was
+skipped with its reason on ARM64 and macOS (no OpenBLAS dispatch there). Assumed, not tested: binary64
+round-to-nearest without flush-to-zero in the process.
 
 CI: the workflow of 0.3.0 (`.github/workflows/ci.yml`: Linux x86-64 3.10–3.14 with three stack sizes and the
-bwrap/podman/docker engines, Linux ARM64, macOS, Windows, free-threaded 3.14t): run 43165166338 on commit d93eda1
-(branch dev-0.3, 2026-11-12), 16 of 16 jobs green (358 tests on Linux x86-64, 348 on macOS and Windows, 316 on Linux
-ARM64, 94 on 3.14t). The last green run of the published code is 43075004652 on commit 7beff99 (0.2.0, 2026-11-11,
+bwrap/podman/docker engines, Linux ARM64, macOS, Windows, free-threaded 3.14t): run 43177561844 on commit 22a5b37
+(branch dev-0.3, 2026-11-12), 16 of 16 jobs green (364 tests on Linux x86-64, 354 on macOS and Windows, 322 on Linux
+ARM64, 100 on 3.14t). The last green run of the published code is 43075004652 on commit 7beff99 (0.2.0, 2026-11-11,
 Python 3.10–3.14, 161 tests each).
 
 ## Limits

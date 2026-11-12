@@ -44,13 +44,6 @@ def _scale_exponent(values) -> int:
     return math.frexp(m)[1]
 
 
-def _finite(out: List[float]) -> List[float]:
-    for v in out:
-        if not math.isfinite(v):
-            raise OverflowError("an eigenvalue estimate is not finite")
-    return out
-
-
 def _fsum_dot(a: Sequence[float], b: Sequence[float]) -> float:
     return math.fsum(map(mul, a, b))
 
@@ -137,7 +130,7 @@ def tridiagonal_lowest(d: Sequence[float], e2: Sequence[float], k: int, first: i
     pad = atol + 2.0 * EPS * scale * n
     pivmin = _pivmin(e2)
     out = _bisect_lowest(lambda x: sturm_count(d, e2, x, pivmin), k, lo - pad, hi + pad, atol, first)
-    return _finite([math.ldexp(x, ex) for x in out])
+    return [math.ldexp(x, ex) for x in out]                # ldexp raises OverflowError beyond float64
 
 
 def householder_tridiagonal(A: Sequence[Sequence[float]]):
@@ -241,7 +234,7 @@ def band_lowest(diag: Sequence[float], bands: Dict[int, Sequence[float]], k: int
     if ex != 0:                                     # exact power-of-two scaling, undone exactly at the end
         diag = [math.ldexp(x, -ex) for x in diag]
         bands = {m: [math.ldexp(x, -ex) for x in b] for m, b in bands.items()}
-        return [math.ldexp(x, ex) for x in band_lowest(diag, bands, k)]
+        return [math.ldexp(x, ex) for x in band_lowest(diag, bands, k)]    # ldexp raises OverflowError beyond float64
     if w <= 1:
         b1 = bands.get(1, [0.0] * (n - 1))
         return tridiagonal_lowest(diag, [x * x for x in b1], k)
@@ -266,7 +259,7 @@ def band_lowest(diag: Sequence[float], bands: Dict[int, Sequence[float]], k: int
             if v * v > big:
                 big = v * v
     pivmin = SAFMIN * big
-    return _finite(_bisect_lowest(lambda x: band_count(diag, bands, w, x, pivmin), k, lo - pad, hi + pad, atol))
+    return _bisect_lowest(lambda x: band_count(diag, bands, w, x, pivmin), k, lo - pad, hi + pad, atol)
 
 
 def _start_vector(n: int) -> List[float]:

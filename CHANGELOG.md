@@ -306,11 +306,20 @@ sphere and Mathieu cases of the probe happened to agree.
 - `tests/test_determinism.py`: the strings of every hash entry (python-flint 0.9.0; another version is skipped with
   the reason), the fluxonium ends spelled out, the same guaranteed intervals in fresh interpreters under
   `OPENBLAS_CORETYPE` unset, Prescott and Nehalem (where numpy runs on run-time-dispatched OpenBLAS on x86-64;
-  skipped elsewhere with the reason), no numpy/scipy eigen-solver called by any guaranteed entry point, and the
-  estimators against numpy on seeded matrices. On the code before, the cross-kernel test and the fluxonium test fail
-  by assertion (the other four by ImportError of the new names); with numpy's `eigvalsh` put back into the fluxonium
-  module (positive control) four of six fail.
-- The CI runs `test_determinism` in every job and the free-threaded job prints the hash too.
+  skipped elsewhere with the reason), no numpy/scipy eigen-solver called by any guaranteed entry point, the
+  estimators against numpy on seeded matrices, the zero-pivot and eigenvector-sign conventions, the overflow refusal,
+  φ_zpf and the fluxonium cuts (9 tests). On the code before, the cross-kernel test and the fluxonium test fail by
+  assertion (6 more by ImportError of the new names, 1 passes); with numpy's `eigvalsh` put back into the fluxonium
+  module (positive control) 4 of 9 fail, under `OPENBLAS_CORETYPE` unset and Prescott alike.
+- Mutation testing of the new and changed lines (36 hand mutants, test file of the mutated module first, on a green
+  tree): 31 killed. Alive: 3 equivalent, declared — `q <= 0` for the first Sturm pivot (a zero pivot is already
+  replaced by −pivmin), a stop tolerance 1e6× larger (still ≈ 1e-302·‖A‖), the scaling exponent + 1 (scaling by a
+  power of two commutes with IEEE rounding without under/overflow); and 2 on an overflow re-check that was dead code
+  (`math.ldexp` already raises OverflowError), now removed. The first round left 8 alive; the tests for the
+  zero-pivot convention, the eigenvector sign, φ_zpf and the fluxonium cut were added and killed 4 of them.
+- The CI runs `test_determinism` in every job and the free-threaded job prints the hash too. Run 43177561844 on
+  22a5b37: 16 of 16 jobs green, all 16 print `4d7d61cd…` (Linux x86-64, ARM64, macOS, Windows, 3.14t); the
+  cross-kernel test ran on the 13 x86-64 jobs and was skipped with its reason on ARM64 and macOS.
 - Measured after the change (2026-11-12): the same hash on Python 3.11.2, 3.12.15, 3.13.15, 3.14.8 × `OPENBLAS_CORETYPE`
   unset/Haswell/Prescott/Nehalem (16 of 16 runs); the probe of 309 inputs identical under the three kernels and on
   Python 3.12 and 3.14. Times (README): a Mathieu value 0.38 → 0.50 ms median, the real-transmon bench 5.6 → 8.7 s

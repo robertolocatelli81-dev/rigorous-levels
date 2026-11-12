@@ -146,6 +146,44 @@ class TestNoLapackInGuaranteedPaths(unittest.TestCase):
                 p.stop()
 
 
+class TestFloatDecisions(unittest.TestCase):
+    """The float decisions outside the estimators: overflow is refused, φ_zpf and the fluxonium cuts are spelled out."""
+
+    def test_overflowing_estimate_is_refused(self):
+        from qraft_ra import _deterministic as D
+        big = 1.7e308
+        with self.assertRaises(OverflowError):                     # λ = 2·1.7e308 is beyond float64
+            D.band_lowest([big, big], {1: [big]}, 2)
+        with self.assertRaises(OverflowError):
+            D.dense_lowest([[big, big], [big, big]], 2)
+        got = D.band_lowest([1.0, 3.0], {1: [0.0]}, 2)                                   # positive control: finite
+        self.assertLess(max(abs(got[0] - 1.0), abs(got[1] - 3.0)), 1e-15)
+
+    def test_phi_zpf_and_cuts(self):
+        from qraft_ra import fluxonium as F
+        f = F.Fluxonium(E_C=1.0, E_J=1.0, E_L=0.01, flux=0.25)
+        self.assertLess(abs(f.phi_zpf ** 4 - 200.0), 1e-12)
+        seen = []
+
+        class Stop(Exception):
+            pass
+
+        def spy(fl, f_, k, width, N, N2, dl):
+            seen.append((N, N2))
+            raise Stop
+
+        if not FLINT:
+            self.skipTest("python-flint absent")
+        with mock.patch.object(F, "_attempt", spy):
+            with self.assertRaises(Stop):
+                F.guaranteed_fluxonium_levels(f, 2, 1e-6, N_initial=100)
+            with self.assertRaises(Stop):
+                F.guaranteed_fluxonium_levels(f, 2, 1e-6)
+        phi2 = 200.0 ** 0.5
+        self.assertEqual(seen[0], (100, int(2.5 * (phi2 * 100) ** 0.5) + 8))            # 102
+        self.assertEqual(seen[1][0], int(6 * phi2) + 16)                                  # 100
+
+
 class TestEstimators(unittest.TestCase):
     """The deterministic estimators agree with LAPACK to a few eps·‖A‖ (they choose points only; this guards the
     efficiency, not the proof), and give the same floats when called twice."""
@@ -184,8 +222,18 @@ class TestEstimators(unittest.TestCase):
             scale = float(np.abs(Bm).sum(axis=1).max())
             self.assertLess(max(abs(a - b) for a, b in zip(got, ref)), 1e3 * 2.2e-16 * n * scale)
             v = D.band_eigenvector(d, bands, got[0])
+            big = max(range(n), key=lambda i: (abs(v[i]), -i))
+            self.assertGreater(v[big], 0.0)                                  # sign convention: largest entry > 0
             r = Bm @ np.array(v) - got[0] * np.array(v)
             self.assertLess(float(np.linalg.norm(r)), 1e3 * 2.2e-16 * n * scale)
+
+    def test_zero_pivot_counts_as_negative(self):
+        """LAPACK dlaebz convention, fixed here so that it cannot change silently: a pivot of exactly 0 (|q| ≤ pivmin)
+        is replaced by −pivmin, so the eigenvalue 0 of diag(0, 5) counts as below x = 0; and the band count agrees."""
+        from qraft_ra import _deterministic as D
+        self.assertEqual(D.sturm_count([0.0, 5.0], [0.0], 0.0, D._pivmin([0.0])), 1)
+        self.assertEqual(D.sturm_count([5.0, 0.0], [0.0], 0.0, D._pivmin([0.0])), 1)
+        self.assertEqual(D.band_count([0.0, 5.0, 7.0], {2: [0.0]}, 2, 0.0, D.SAFMIN), 1)
 
     def test_first_index(self):
         from qraft_ra import _deterministic as D
