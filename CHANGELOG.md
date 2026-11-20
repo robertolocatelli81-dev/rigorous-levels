@@ -5,6 +5,41 @@ released.
 
 ## Unreleased
 
+### The work folder must be unchanged after the run, otherwise the outputs are ERROR (2026-11-20)
+
+Rule written first in `docs/PORT_CONTRACT.md` §6.7. Up to this change an entry in the work folder that the library did
+not put there (the folder is read-only for the port) was ignored and then removed by `shutil.rmtree`, and the port's
+output was accepted. Measured on the code before this change with the engine replaced (`_run_engine` writes a valid
+output, then plants or changes something in the work folder, as a run able to write into `/work` would): 22 of 22
+cases gave `OK`, as the control with nothing planted (a file, a hidden file, a name that is not UTF-8, a folder, a folder with a file, a symbolic link to a
+file of the user, a dangling one, one to a folder, a hard link to a file of the user, a FIFO, a socket, the mode of
+`port_runner.py` and of the folder changed, `request.json` rewritten with the same size and time or made longer, its
+time changed, a second name made for it outside, `output.json` removed, `port_runner.py` replaced, `stderr.txt`
+replaced by a link, an entry created and removed, the same with the folder's time set back). Now `isolation.run`
+records the folder before the run and reads it again after it: 21 of the 22 give `ERROR` with the reason
+"work folder changed during the run (it is read-only for the port): " followed by the entries named (kind, mode,
+inode, number of names, owner, size, time, content; up to 20, the others counted), for every output of a batch,
+before the timeout and the host caps; the last one, with the folder's time set back by the port, is the limit written
+in §6.7 (still `OK`), and the control stays `OK`. Script: `prova_D1.py` in the author's notes of 2026-11-20.
+
+Same class, found on the way and changed: `_copy_run_stderr` wrote the wasm run's standard error into
+`<work>/stderr.txt` with `open(dst, "wb")`, which follows a link: with that name replaced by a symbolic link to a file
+of the user, the file's content was replaced by the run's standard error (measured on the code before this change).
+Now it opens it with `O_NOFOLLOW` and without `O_TRUNC`, writes only into a regular file with one name, and truncates
+through the descriptor. And the wasm engine sets back, after the run, the modes it recorded before it, each only on the
+file it was recorded for (before: 0644 on every file and 0755 on the folder, which is created 0700).
+
+`tests/test_multiport.py` `TestWorkFolderClosed20261120` (13 tests: every kind of entry and change named, 23 kinds on
+Linux; batch, timeout and cap precedence; 57 entries, 20 named and 37 counted, the same reason whatever order the
+folder is listed in; 60 seeded random sets of changes and names; the time-set-back limit; a folder that cannot be read
+again; the content read only from the file recorded; the wasm modes, twice; the copy of stderr; the real engines
+available leave the folder unchanged). On the code before this change 11 of the 13 fail (the control and the
+real-engine test pass). 25 mutants of the changed lines of `isolation.py`, 25 killed (2 alive at the first round, the
+order of the listing and the identity of the hashed file: covered by the two tests added for them). Two earlier tests changed: `test_vouched_engine_named_in_the_description` now gives `run()` a
+real folder, and the stderr test with `O_NOFOLLOW` counts the second `os.open` (the copy) and no longer reuses the
+copy of the call before. Not measured: Windows, macOS and the container engines (CI jobs); whether a WASI guest under
+wasmtime can write into `/work` (wasmtime is not installed where this was measured).
+
 ### The wasm engine no longer changes the mode of what a link in the work folder names (2026-11-20)
 
 `isolation._run_wasm` made the files of the work folder read-only for the run (0444) and writable after it (0644)

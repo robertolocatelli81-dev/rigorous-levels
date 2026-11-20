@@ -349,7 +349,8 @@ def run_ports(requests, python: Optional[str] = None, *, engine: str = "auto", i
         rc, timed_out, descr, limit = isolation.run(engine, work, out_path, seconds, mem, list(reqs[0].site_packages),
                                                     python, image)
         descr = f"{engine} (batch of {len(reqs)}): {descr}"
-        if limit:                            # a cap enforced from the host: whatever the port wrote is discarded
+        if limit:                            # a cap enforced from the host, or the work folder changed (§6.7): whatever
+                                             # the port wrote is discarded
             return tuple(Output(r.port, "", (), r.unit, "ERROR", limit, 0.0, descr) for r in reqs)
         if timed_out:
             return tuple(_invalid(r, f"timeout: over {seconds + 5} s (batch)", float(seconds + 5), descr) for r in reqs)
@@ -405,7 +406,8 @@ def run_port(r: Request, python: Optional[str] = None, *, engine: str = "auto", 
         rc, timed_out, descr, limit = isolation.run(engine, work, out_path, r.seconds, r.mem_mib, list(r.site_packages),
                                                     python, image)
         descr = f"{engine}: {descr}"
-        if limit:                            # a cap enforced from the host: whatever the port wrote is discarded
+        if limit:                            # a cap enforced from the host, or the work folder changed (§6.7): whatever
+                                             # the port wrote is discarded
             return Output(r.port, "", (), r.unit, "ERROR", limit, 0.0, descr)
         if timed_out:
             return _invalid(r, f"timeout: over {r.seconds + 5} s", float(r.seconds + 5), descr)

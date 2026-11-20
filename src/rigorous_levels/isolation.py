@@ -23,6 +23,8 @@ rlimit and the memory is bounded by wasmtime's `-W max-memory-size`.
 """
 from __future__ import annotations
 
+import bisect
+import hashlib
 import json
 import os
 import secrets
@@ -53,6 +55,9 @@ SANDBOX_ENV = {"HOME": "/tmp/nohome", "PATH": "/usr/bin:/bin", "PYTHONDONTWRITEB
 CONTAINER_PIDS = 16   # docker --pids-limit (processes and threads of the container): the same cap as RLIMIT_NPROC
 FILE_CAP = 64 << 20   # RLIMIT_FSIZE of the runner; checked from the host where the platform has no such rlimit
 WATCH_INTERVAL = 0.02  # seconds between two samples of the host watchdog (sandbox-exec, appcontainer)
+WORK_FOLDER_TIME_NS = 86400 * 10 ** 9   # modification time given to the work folder before the run (PORT_CONTRACT §6.7)
+WORK_HOST_WRITES = (b"stderr.txt",)     # entries the host itself writes during or after the run: size, time, content
+WORK_REASON_MAX = 20                    # differences named in the reason of a changed work folder (the others counted)
 _PROBES: Dict[Tuple[str, str], Dict[str, object]] = {}
 
 
@@ -922,7 +927,7 @@ def _probe_wasm() -> Dict[str, object]:
     return facts
 
 
-def _chmod_regular_file(path: str, mode: int) -> None:
+def _chmod_regular_file(path: str, mode: int, same: Optional[Tuple[int, int]] = None) -> None:
     """chmod of a regular file of the work folder that has this one name, never of what a link names: os.walk lists a
     symbolic link to a file among the files, and os.chmod follows it (0.3.0: a link planted in the work folder, pointing
     at a 0600 file of the user, left that file 0644 after the run); a hard link to that file is a regular file whose
@@ -930,12 +935,13 @@ def _chmod_regular_file(path: str, mode: int) -> None:
     a file with more than one name (st_nlink != 1) is left as it is too. A symbolic link, a FIFO, a socket or a device
     is left as it is; the file is opened with O_NOFOLLOW and changed through its descriptor, so a name swapped between
     the check and the change is not followed either (lstat + chmod where os.fchmod or O_NOFOLLOW is missing:
-    Windows). The files the library puts in the work folder have one name."""
+    Windows). The files the library puts in the work folder have one name. With `same` = (device, inode) the file must
+    also be that file (the mode recorded before the run is set back only on the file it was recorded for)."""
     try:
         st = os.lstat(path)
     except OSError:
         return
-    if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or (same is not None and (st.st_dev, st.st_ino) != same):
         return
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     if not nofollow or not hasattr(os, "fchmod"):
@@ -960,7 +966,9 @@ def _copy_run_stderr(src: str, dst: str) -> None:
     nothing) is not read: `dst` then holds one line saying so. Measured on 0.3.0 with the engine replaced: with
     stderr.txt replaced by a link to a file of the user, shutil.copy copied that file's bytes (their last 600 go into
     the reason of an output without levels); removed, or replaced by a folder or a FIFO, FileNotFoundError,
-    IsADirectoryError or shutil.SpecialFileError left _run_wasm."""
+    IsADirectoryError or shutil.SpecialFileError left _run_wasm. `dst` (in the work folder) is opened with O_NOFOLLOW
+    and without O_TRUNC, written only if it is a regular file with one name, and truncated through the descriptor:
+    anything else there is left as it is, and named by the check of the work folder (docs/PORT_CONTRACT.md §6.7)."""
     why = ""
     fd = -1
     try:
@@ -976,7 +984,16 @@ def _copy_run_stderr(src: str, dst: str) -> None:
     except OSError as e:
         why = type(e).__name__
     try:
-        with open(dst, "wb") as out:
+        try:
+            fo = os.open(dst, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                         | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0), 0o666)
+        except OSError:
+            return                               # a link, a FIFO without reader, a folder: left as it is
+        with os.fdopen(fo, "wb") as out:
+            fs = os.fstat(out.fileno())
+            if not (stat.S_ISREG(fs.st_mode) and fs.st_nlink == 1):
+                return
+            out.truncate(0)
             if why:
                 out.write(f"[rigorous-levels] the stderr file of the run was not read: {why}\n".encode("utf-8"))
             else:
@@ -988,6 +1005,150 @@ def _copy_run_stderr(src: str, dst: str) -> None:
             os.close(fd)
 
 
+# ── the work folder after the run (docs/PORT_CONTRACT.md §6.7) ────────────────────────────────────────────────────
+_KINDS = ((stat.S_ISDIR, "folder"), (stat.S_ISLNK, "symbolic link"), (stat.S_ISFIFO, "FIFO"), (stat.S_ISSOCK, "socket"),
+          (stat.S_ISCHR, "character device"), (stat.S_ISBLK, "block device"))
+
+
+def _kind(st: os.stat_result) -> str:
+    if stat.S_ISREG(st.st_mode):
+        return "file" if st.st_nlink == 1 else f"hard link (a file with {st.st_nlink} names)"
+    for test, name in _KINDS:
+        if test(st.st_mode):
+            return name
+    return f"entry of unknown kind (mode {oct(st.st_mode)})"
+
+
+def _shown(name: bytes) -> str:
+    """A name of the work folder as a Python literal, at most 80 characters: a str literal if the name is UTF-8, else
+    a bytes literal (the other bytes as \\x escapes), so the two cannot be confused."""
+    try:
+        r = repr(name.decode("utf-8"))
+    except UnicodeDecodeError:
+        r = repr(name)
+    return r if len(r) <= 80 else r[:77] + "..."
+
+
+def _content_sha256(path: bytes, st: os.stat_result) -> str:
+    """SHA-256 of a regular file read through a descriptor opened with O_NOFOLLOW | O_NONBLOCK that must be the file
+    `st` describes (device and inode); otherwise a word saying why it was not read."""
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                     | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
+    except OSError as e:
+        return f"not read ({type(e).__name__})"
+    try:
+        fs = os.fstat(fd)
+        if not (stat.S_ISREG(fs.st_mode) and (fs.st_dev, fs.st_ino) == (st.st_dev, st.st_ino)):
+            return "not the same regular file"
+        h = hashlib.sha256()
+        while True:
+            b = os.read(fd, 1 << 16)
+            if not b:
+                return h.hexdigest()
+            h.update(b)
+    finally:
+        os.close(fd)
+
+
+def _meta(st: os.stat_result) -> Dict[str, int]:
+    return {"kind": stat.S_IFMT(st.st_mode), "mode": stat.S_IMODE(st.st_mode), "device": st.st_dev, "inode": st.st_ino,
+            "names": st.st_nlink, "owner": st.st_uid, "group": st.st_gid}
+
+
+def _entry_record(folder: bytes, name: bytes) -> Dict[str, object]:
+    path = os.path.join(folder, name)
+    st = os.lstat(path)
+    rec: Dict[str, object] = _meta(st)
+    if name not in WORK_HOST_WRITES:
+        rec["size"], rec["time"] = st.st_size, st.st_mtime_ns
+        rec["content"] = _content_sha256(path, st) if stat.S_ISREG(st.st_mode) else ""
+    return rec
+
+
+def work_snapshot(work: str) -> Dict[str, object]:
+    """Before the run: the folder's modification time set to WORK_FOLDER_TIME_NS, then the record of the folder and of
+    every entry the host put there (lstat: links not followed; names as bytes)."""
+    folder = os.fsencode(work)
+    os.utime(folder, ns=(WORK_FOLDER_TIME_NS, WORK_FOLDER_TIME_NS))
+    entries = {n: _entry_record(folder, n) for n in sorted(os.listdir(folder))}
+    st = os.lstat(folder)
+    return {"folder": dict(_meta(st), time=st.st_mtime_ns), "entries": entries}
+
+
+def _fields(before: Dict[str, object], after: Dict[str, object]) -> str:
+    out = []
+    for k, v in before.items():
+        w = after.get(k)
+        if w == v:
+            continue
+        if k == "kind":
+            out.append("kind changed")
+        elif k == "mode":
+            out.append(f"mode {oct(v)} -> {oct(w)}")
+        elif k in ("names", "size", "owner", "group"):
+            out.append(f"{k} {v} -> {w}")
+        elif k == "time":
+            out.append("modification time changed")
+        else:
+            out.append(f"{k} changed")
+    return ", ".join(out)
+
+
+def work_changes(work: str, before: Dict[str, object]) -> str:
+    """After the run: "" if the work folder holds exactly what `before` recorded, else the reason of an ERROR naming
+    the differences (at most WORK_REASON_MAX, sorted by name, the others counted). Never raises."""
+    head = "work folder changed during the run (it is read-only for the port): "
+    folder = os.fsencode(work)
+    try:
+        diffs: List[Tuple[bytes, str]] = []
+        extra = 0
+        old = before["entries"]
+        seen = set()
+        with os.scandir(folder) as it:
+            for e in it:
+                n = e.name
+                if n in old:
+                    seen.add(n)
+                    try:
+                        what = _fields(old[n], _entry_record(folder, n))
+                    except FileNotFoundError:
+                        what = "removed while the folder was read"
+                    if what:
+                        bisect.insort(diffs, (n, f"{_shown(n)}: {what}"))
+                        if len(diffs) > WORK_REASON_MAX:
+                            diffs.pop()
+                            extra += 1
+                    continue
+                if len(diffs) >= WORK_REASON_MAX and n > diffs[-1][0]:
+                    extra += 1                   # only the first names in order are described
+                    continue
+                try:
+                    k = _kind(os.lstat(os.path.join(folder, n)))
+                except OSError as err:
+                    k = f"entry ({type(err).__name__} at lstat)"
+                bisect.insort(diffs, (n, f"{_shown(n)}: {k} the host did not put there"))
+                if len(diffs) > WORK_REASON_MAX:
+                    diffs.pop()
+                    extra += 1
+        for n in sorted(set(old) - seen):
+            diffs.append((n, f"{_shown(n)}: missing"))
+        st = os.lstat(folder)
+        what = _fields(before["folder"], dict(_meta(st), time=st.st_mtime_ns))
+    except OSError as err:
+        return head + f"the folder could not be read again ({type(err).__name__})"
+    diffs.sort()
+    if len(diffs) > WORK_REASON_MAX:
+        extra += len(diffs) - WORK_REASON_MAX
+        diffs = diffs[:WORK_REASON_MAX]
+    parts = [d for _, d in diffs]
+    if what:
+        parts.append(f"the folder: {what}" + (" (an entry was created or removed)" if "modification time" in what else ""))
+    if extra:
+        parts.append(f"and {extra} more")
+    return head + "; ".join(parts) if parts else ""
+
+
 def _run_wasm(work: str, out_path: str, seconds: int, site_packages: List[str], stderr_path: str):
     facts = probe("wasm")
     # the output file must be writable: WASI pre-opens folders, so the work folder is pre-opened read-only and the
@@ -995,10 +1156,16 @@ def _run_wasm(work: str, out_path: str, seconds: int, site_packages: List[str], 
     # single file: the runner writes <folder>/output.json, so a writable folder holding only that file is pre-opened
     outdir = os.path.dirname(out_path)
     # no site-packages under WASI (native wheels cannot load there; pre-opens are read-write): pure Python only.
-    # The work folder is made non-writable for the run (pre-opens are read-write) and restored for the cleanup.
-    for root, dirs, files in os.walk(work):
-        for n in files:
-            _chmod_regular_file(os.path.join(root, n), 0o444)
+    # The work folder is made non-writable for the run (pre-opens are read-write); after it the folder and the files
+    # the host put there get back the modes recorded here, each only on the file it was recorded for (§6.7).
+    saved = []
+    for n in sorted(os.listdir(work)):
+        p = os.path.join(work, n)
+        st = os.lstat(p)
+        if stat.S_ISREG(st.st_mode) and st.st_nlink == 1:
+            saved.append((p, stat.S_IMODE(st.st_mode), (st.st_dev, st.st_ino)))
+            _chmod_regular_file(p, 0o444, (st.st_dev, st.st_ino))
+    work_mode = stat.S_IMODE(os.lstat(work).st_mode)
     os.chmod(work, 0o555)
     cmd = _wasm_cmd(facts["exe"], facts["folder"], [(work, "/work"), (outdir, "/out")],
                     seconds, {"HOME": "/nohome", "RIGOROUS_LEVELS_OUTPUT_DIR": "/out"})
@@ -1006,10 +1173,9 @@ def _run_wasm(work: str, out_path: str, seconds: int, site_packages: List[str], 
     try:
         rc, timed_out = _run(cmd, seconds + 5, os.path.join(outdir, "stderr.txt"), {"PATH": os.environ.get("PATH", "")})
     finally:
-        os.chmod(work, 0o755)
-        for root, dirs, files in os.walk(work):
-            for n in files:
-                _chmod_regular_file(os.path.join(root, n), 0o644)
+        os.chmod(work, work_mode)
+        for p, mode, same in saved:
+            _chmod_regular_file(p, mode, same)
     _copy_run_stderr(os.path.join(outdir, "stderr.txt"), stderr_path)
     return rc, timed_out, (f"wasmtime (WASI, no sockets, pre-opened folders only, max memory {WASM_MAX_MEMORY >> 20} MiB); "
                            f"CPython {facts['version'][0]}.{facts['version'][1]} for WASI: numpy {facts['numpy']}")
@@ -1054,10 +1220,19 @@ def run(engine: str, work: str, out_path: str, seconds: int, mem_mib: int, site_
         python: Optional[str] = None, image: Optional[str] = None) -> Tuple[Optional[int], bool, str, str]:
     """Runs `<work>/port_runner.py <work>` inside `engine`. Returns (return code or None, timed_out, description,
     limit): `limit` is the reason a cap enforced from the host was exceeded (memory, disk: sandbox-exec, appcontainer),
-    "" otherwise; the description names an engine binary accepted only through RIGOROUS_LEVELS_TRUSTED_ENGINES."""
+    "" otherwise; the description names an engine binary accepted only through RIGOROUS_LEVELS_TRUSTED_ENGINES.
+    The work folder must be the same after the run (docs/PORT_CONTRACT.md §6.7): any entry the host did not put there,
+    or any change to one it did, makes `limit` the reason naming them (the caller makes the outputs ERROR), before the
+    reason of a cap. `stderr.txt` is created here, empty, before the folder is recorded."""
+    with open(os.path.join(work, "stderr.txt"), "wb"):
+        pass
+    before = work_snapshot(work)
     res = _run_engine(engine, work, out_path, seconds, mem_mib, site_packages, python, image)
     rc, timed_out, descr = res[:3]
     limit = res[3] if len(res) > 3 else ""
+    changed = work_changes(work, before)
+    if changed:
+        limit = changed + (f"; {limit}" if limit else "")
     vouched = _VOUCHED.get("wasmtime" if engine == "wasm" else engine)
     if vouched:
         descr += (f"; engine binary {vouched} is user-owned, accepted because RIGOROUS_LEVELS_TRUSTED_ENGINES lists it "

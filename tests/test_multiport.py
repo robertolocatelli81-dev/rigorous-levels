@@ -962,15 +962,17 @@ class TestNemesis030EngineTrust(unittest.TestCase):
     def test_vouched_engine_named_in_the_description(self):
         from rigorous_levels import isolation
         originale = isolation._run_engine
+        w = tempfile.mkdtemp()                  # run() records the work folder (PORT_CONTRACT §6.7): a real one
         try:
             isolation._run_engine = lambda *a, **k: (0, False, "wasmtime (WASI)")
             isolation._VOUCHED["wasmtime"] = "/x/wasmtime"
-            self.assertIn("RIGOROUS_LEVELS_TRUSTED_ENGINES lists it", isolation.run("wasm", "w", "o", 1, 1, [])[2])
+            self.assertIn("RIGOROUS_LEVELS_TRUSTED_ENGINES lists it", isolation.run("wasm", w, "o", 1, 1, [])[2])
             isolation._VOUCHED.pop("wasmtime")
-            self.assertEqual(isolation.run("wasm", "w", "o", 1, 1, [])[2], "wasmtime (WASI)")
+            self.assertEqual(isolation.run("wasm", w, "o", 1, 1, [])[2], "wasmtime (WASI)")
         finally:
             isolation._run_engine = originale
             isolation._VOUCHED.pop("wasmtime", None)
+            shutil.rmtree(w, ignore_errors=True)
 
     def test_any_root_refused_for_grants(self):
         from rigorous_levels import isolation
@@ -1632,6 +1634,8 @@ class TestWasmHardLinkAndStderr20261120(unittest.TestCase):
             real_lstat, real_fstat = os.lstat, os.fstat
 
             def read(src):
+                if os.path.lexists(dst):
+                    os.unlink(dst)                      # nothing left from the call before
                 isolation._copy_run_stderr(src, dst)
                 with open(dst, "rb") as f:
                     return f.read()
@@ -1642,8 +1646,9 @@ class TestWasmHardLinkAndStderr20261120(unittest.TestCase):
                 return real_open(path, flags, *a, **k)
             with mock.patch.object(isolation.os, "open", rec_open):
                 self.assertEqual(read(reg), b"true stderr\n")
-            self.assertEqual(len(opened), 1)
+            self.assertEqual(len(opened), 2)                # the run's stderr file, then the copy (§6.7)
             self.assertTrue(opened[0] & os.O_NOFOLLOW and opened[0] & os.O_NONBLOCK, opened)
+            self.assertTrue(opened[1] & os.O_NOFOLLOW and not opened[1] & os.O_TRUNC, opened)
             with mock.patch.object(isolation.os, "O_NOFOLLOW", 0):
                 for q in (hl, sl, reg):
                     isolation._chmod_regular_file(q, 0o644)
@@ -1669,8 +1674,12 @@ class TestWasmHardLinkAndStderr20261120(unittest.TestCase):
             with open(reg, "w") as f:
                 f.write("true stderr\n")
 
-            def fstat_fifo(fd):                             # the same inode, no longer a regular file
+            reg_id = (real_lstat(reg).st_dev, real_lstat(reg).st_ino)
+
+            def fstat_fifo(fd):                             # the same inode, no longer a regular file (the source only)
                 st = real_fstat(fd)
+                if (st.st_dev, st.st_ino) != reg_id:
+                    return st
                 return os.stat_result((stat.S_IFIFO | 0o600,) + tuple(st)[1:])
             with mock.patch.object(isolation.os, "fstat", fstat_fifo):
                 got = read(reg)
@@ -1678,6 +1687,399 @@ class TestWasmHardLinkAndStderr20261120(unittest.TestCase):
             self.assertEqual(read(reg), b"true stderr\n")                          # control
         finally:
             shutil.rmtree(d, ignore_errors=True)
+
+
+class TestWorkFolderClosed20261120(unittest.TestCase):
+    """docs/PORT_CONTRACT.md §6.7 (rule of 2026-11-20): the work folder is read-only for the port, so after the run any
+    entry the host did not put there, and any change to one it did, makes the outputs ERROR with a reason naming them.
+    Up to 0.3.0 such entries were ignored and then removed by shutil.rmtree (measured: 23 of 23 cases OK, the output
+    accepted). The engine is replaced (_run_engine): it writes a valid output, then plants or changes something in the
+    work folder, as a run able to write into /work would."""
+
+    HEAD = "work folder changed during the run (it is read-only for the port): "
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.victim = os.path.join(self.d, "victim")
+        with open(self.victim, "w") as f:
+            f.write("SECRET-OF-THE-USER\n")
+        os.chmod(self.victim, 0o600)
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    @staticmethod
+    def _req(port="numpy_rotor"):
+        return MP.Request(port=port, model=ROTOR, levels=6, truncation={"ncut": 30}, unit="GHz", seconds=5, mem_mib=256,
+                          site_packages=())
+
+    def _go(self, plant, batch=0, timed_out=False, limit=""):
+        """run_port (or run_ports with `batch` requests) through the replaced engine; returns the outputs"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        works = []
+
+        def engine(eng, work, out_path, seconds, mem_mib, site_packages, python, image):
+            works.append(work)
+            with open(os.path.join(work, "stderr.txt"), "wb") as f:      # what the host writes during the run
+                f.write(b"stderr of the run\n")
+            one = {"contract": MP.CONTRACT, "port": "numpy_rotor", "solver_version": "x", "levels": [1.0] * 6,
+                   "unit": "GHz", "state": "OK", "reason": "", "seconds": 0.1}
+            with open(out_path, "w") as f:
+                json.dump([one] * batch if batch else one, f)
+            plant(work)
+            return (0, False, "replaced engine", limit) if not timed_out else (None, True, "replaced engine", limit)
+        with mock.patch.object(isolation, "probe", return_value={}), mock.patch.object(isolation, "_run_engine", engine):
+            if batch:
+                outs = MP.run_ports([self._req()] * batch, engine="bwrap")
+            else:
+                outs = (MP.run_port(self._req(), engine="bwrap"),)
+        self.assertEqual(len(works), 1)
+        self.assertFalse(os.path.lexists(works[0]), "the work folder is removed after the run")
+        return outs
+
+    def _kinds(self):
+        """(name in the reason, plant) for every kind of entry this platform can make"""
+        v, vd = self.victim, self.d
+        k = [("'new.txt': file the host did not put there", lambda w: open(os.path.join(w, "new.txt"), "w").close()),
+             ("'.hidden': file", lambda w: open(os.path.join(w, ".hidden"), "w").close()),
+             ("'dir': folder", lambda w: os.mkdir(os.path.join(w, "dir"))),
+             ("'d2': folder", lambda w: (os.mkdir(os.path.join(w, "d2")), open(os.path.join(w, "d2", "f"), "w").close())),
+             ("'output.json': missing", lambda w: os.unlink(os.path.join(w, "output.json"))),
+             ("'request.json': size", lambda w: self._append(os.path.join(w, "request.json"))),
+             ("'request.json': modification time changed", lambda w: os.utime(os.path.join(w, "request.json"), (1, 1))),
+             ("'port_runner.py': inode changed", lambda w: self._replace(w, "port_runner.py")),
+             ("'request.json': content changed", lambda w: self._same_size(w, "request.json")),
+             ("the folder: modification time changed (an entry was created or removed)", self._create_remove),
+             ("'stderr.txt': missing", lambda w: os.unlink(os.path.join(w, "stderr.txt"))),
+             ("'été ☃': file", lambda w: open(os.path.join(w, "été ☃"), "w").close())]
+        if os.name == "posix":
+            k += [("'port_runner.py': mode 0o", lambda w: os.chmod(os.path.join(w, "port_runner.py"), 0o666)),
+                  ("the folder: mode 0o", lambda w: os.chmod(w, 0o777))]
+            try:
+                p = os.path.join(os.fsencode(self.d), b"probe\xff")
+                open(p, "w").close()
+                os.unlink(p)
+                k.append(("b'bad\\xff\\xfe': file", lambda w: open(os.path.join(os.fsencode(w), b"bad\xff\xfe"), "w").close()))
+            except OSError:                                          # a file system that refuses such names
+                pass
+        if hasattr(os, "symlink"):
+            try:
+                os.symlink(v, os.path.join(vd, "probe_link"))
+                os.unlink(os.path.join(vd, "probe_link"))
+                k += [("'link': symbolic link", lambda w: os.symlink(v, os.path.join(w, "link"))),
+                      ("'dangling': symbolic link", lambda w: os.symlink(os.path.join(vd, "none"), os.path.join(w, "dangling"))),
+                      ("'dlink': symbolic link", lambda w: os.symlink(vd, os.path.join(w, "dlink"))),
+                      ("'stderr.txt': kind changed", lambda w: (os.unlink(os.path.join(w, "stderr.txt")),
+                                                               os.symlink(v, os.path.join(w, "stderr.txt"))))]
+            except (OSError, NotImplementedError):                   # Windows without the right to make links
+                pass
+        if hasattr(os, "link"):
+            k += [("'hard': hard link (a file with 2 names)", lambda w: os.link(v, os.path.join(w, "hard"))),
+                  ("'request.json': names 1 -> 2", lambda w: os.link(os.path.join(w, "request.json"),
+                                                                     os.path.join(vd, "second_" + os.path.basename(w))))]
+        if hasattr(os, "mkfifo"):
+            k.append(("'fifo': FIFO", lambda w: os.mkfifo(os.path.join(w, "fifo"))))
+        if hasattr(socket, "AF_UNIX") and os.name == "posix":
+            k.append(("'sock': socket", self._socket))
+        return k
+
+    @staticmethod
+    def _socket(w):
+        s, here = socket.socket(socket.AF_UNIX), os.getcwd()
+        os.chdir(w)                                              # AF_UNIX paths are short
+        try:
+            s.bind("sock")
+        finally:
+            os.chdir(here)
+            s.close()
+
+    @staticmethod
+    def _append(p):
+        with open(p, "a") as f:
+            f.write(" ")
+
+    @staticmethod
+    def _create_remove(w):
+        p = os.path.join(w, "tmp_entry")
+        open(p, "w").close()
+        os.unlink(p)
+
+    @staticmethod
+    def _replace(w, n):
+        p = os.path.join(w, n)
+        with open(p, "rb") as f:
+            b = f.read()
+        with open(p + ".new", "wb") as f:
+            f.write(b)
+        os.replace(p + ".new", p)
+
+    @staticmethod
+    def _same_size(w, n):
+        p = os.path.join(w, n)
+        st = os.lstat(p)
+        with open(p, "r+b") as f:
+            b = f.read()
+            f.seek(0)
+            f.write(bytes([b[0] ^ 1]) + b[1:])
+        os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+    def test_control_nothing_changed(self):
+        u, = self._go(lambda w: None)
+        self.assertEqual((u.state, u.reason), ("OK", ""))
+
+    def test_every_kind_of_entry_and_change_is_named(self):
+        kinds = self._kinds()
+        if os.name == "posix" and sys.platform.startswith("linux"):
+            self.assertEqual(len(kinds), 23)                      # on Linux no kind may drop out
+        for named, plant in kinds:
+            with self.subTest(named=named):
+                u, = self._go(plant)
+                self.assertEqual(u.state, "ERROR", u)
+                self.assertTrue(u.reason.startswith(self.HEAD), u.reason)
+                self.assertIn(named, u.reason)
+                self.assertEqual(u.levels, ())
+        self.assertEqual(stat.S_IMODE(os.stat(self.victim).st_mode), 0o600)
+        with open(self.victim) as f:
+            self.assertEqual(f.read(), "SECRET-OF-THE-USER\n")
+
+    def test_batch_timeout_and_cap_precedence(self):
+        plant = lambda w: open(os.path.join(w, "x"), "w").close()     # noqa: E731
+        outs = self._go(plant, batch=3)
+        self.assertEqual([o.state for o in outs], ["ERROR"] * 3)
+        self.assertTrue(all(o.reason.startswith(self.HEAD + "'x': file") for o in outs), outs)
+        u, = self._go(plant, timed_out=True)                      # before the timeout
+        self.assertEqual(u.state, "ERROR")
+        self.assertIn("'x': file", u.reason)
+        u, = self._go(plant, limit="memory: over the cap (host watchdog)")
+        self.assertEqual(u.state, "ERROR")
+        self.assertTrue(u.reason.startswith(self.HEAD) and u.reason.endswith("; memory: over the cap (host watchdog)"))
+        u, = self._go(lambda w: None, timed_out=True)             # control: the timeout alone
+        self.assertEqual(u.state, "INVALID")
+
+    def test_many_entries_first_twenty_named_and_the_others_counted(self):
+        names = [f"e{i:03d}" for i in range(57)]
+
+        def plant(w):
+            for n in reversed(names):
+                open(os.path.join(w, n), "w").close()
+        u, = self._go(plant)
+        self.assertEqual(u.state, "ERROR")
+        for n in names[:20]:
+            self.assertIn(f"'{n}': file", u.reason)
+        for n in names[20:]:
+            self.assertNotIn(f"'{n}'", u.reason)
+        self.assertTrue(u.reason.endswith("the folder: modification time changed (an entry was created or removed); "
+                                          "and 37 more"), u.reason[-120:])
+
+    def test_named_and_counted_whatever_order_the_folder_lists(self):
+        """the same 57 entries listed in ascending, descending and a shuffled order (file systems differ: btrfs lists
+        in order of creation): the same reason each time"""
+        import random
+        from unittest import mock
+        from rigorous_levels import isolation
+        w = tempfile.mkdtemp(dir=self.d)
+        open(os.path.join(w, "request.json"), "w").close()
+        before = isolation.work_snapshot(w)
+        names = [f"e{i:03d}".encode() for i in range(57)]
+        for n in names:
+            open(os.path.join(os.fsencode(w), n), "w").close()
+        real = os.scandir
+        shuffled = list(names)
+        random.Random(7).shuffle(shuffled)
+        reasons = set()
+        for order in (sorted(names), sorted(names, reverse=True), shuffled):
+            def listing(path, order=order):
+                entries = {e.name: e for e in real(path)}
+                ordered = [entries[n] for n in order] + [e for n, e in entries.items() if n not in order]
+
+                class It:
+                    def __enter__(self):
+                        return iter(ordered)
+
+                    def __exit__(self, *a):
+                        return False
+                return It()
+            with mock.patch.object(isolation.os, "scandir", listing):
+                reasons.add(isolation.work_changes(w, before))
+        self.assertEqual(len(reasons), 1, reasons)
+        r = reasons.pop()
+        self.assertTrue(r.endswith("; and 37 more"), r[-80:])
+        self.assertIn("'e019': file", r)
+        self.assertNotIn("'e020'", r)
+
+    def test_content_read_only_from_the_file_recorded(self):
+        """the content is hashed only if the descriptor is the file lstat saw (device and inode)"""
+        from rigorous_levels import isolation
+        a, b = os.path.join(self.d, "a"), os.path.join(self.d, "b")
+        for q in (a, b):
+            with open(q, "w") as f:
+                f.write("same\n")
+        self.assertEqual(isolation._content_sha256(os.fsencode(a), os.lstat(a)),
+                         isolation._content_sha256(os.fsencode(b), os.lstat(b)))           # control: same bytes
+        self.assertEqual(isolation._content_sha256(os.fsencode(a), os.lstat(b)), "not the same regular file")
+
+    def test_generative(self):
+        """seeded random sets of 0-4 changes from the pool, names drawn from a closed alphabet (hidden, case, UTF-8,
+        long): ERROR exactly when a change was made, and every change named while at most 20 differences exist"""
+        import random
+        rng = random.Random(20261120)
+        pool = self._kinds()
+        alphabet = ["a", "Z", ".", "_", "-", " ", "é", "☃", "0"]
+        runs = errors = 0
+        for _ in range(60):
+            picks = rng.sample(pool, rng.randint(0, 4))
+            fresh = ["".join(rng.choice(alphabet) for _ in range(rng.randint(1, 40))) for _ in range(rng.randint(0, 3))]
+            fresh = [n for n in dict.fromkeys(fresh) if n not in (".", "..") and n.strip()
+                     and n not in ("request.json", "port_runner.py", "output.json", "stderr.txt")]
+
+            def plant(w, picks=picks, fresh=fresh):
+                for _, p in picks:
+                    p(w)
+                for n in fresh:
+                    q = os.path.join(w, n)
+                    if not os.path.lexists(q):
+                        open(q, "w").close()
+            u, = self._go(plant)
+            runs += 1
+            changed = bool(picks or fresh)
+            self.assertEqual(u.state, "ERROR" if changed else "OK", (picks, fresh, u.reason))
+            errors += u.state == "ERROR"
+            for named, _ in picks:
+                if "names 1 -> 2" in named and any("'request.json'" in n2 for n2, _ in picks if n2 != named):
+                    continue                                       # another change to the same entry comes first
+                self.assertIn(named.split(":")[0], u.reason)
+            for n in fresh:
+                self.assertIn(repr(n)[:77], u.reason)
+            for f in os.listdir(self.d):                           # second names made outside: removed each time
+                if f.startswith("second_"):
+                    os.unlink(os.path.join(self.d, f))
+        self.assertEqual(runs, 60)
+        self.assertGreater(errors, 40)
+
+    def test_not_seen_when_the_folder_time_is_set_back(self):
+        """the limit written in §6.7, measured: an entry created and removed, with the folder's time set back"""
+        def plant(w):
+            st = os.lstat(w)
+            self._create_remove(w)
+            os.utime(w, ns=(st.st_atime_ns, st.st_mtime_ns))
+        u, = self._go(plant)
+        self.assertEqual(u.state, "OK")
+        u, = self._go(self._create_remove)                        # control: without the time set back
+        self.assertEqual(u.state, "ERROR")
+
+    def test_folder_unreadable_after_the_run(self):
+        from unittest import mock
+        from rigorous_levels import isolation
+        w = tempfile.mkdtemp(dir=self.d)
+        before = isolation.work_snapshot(w)
+        with mock.patch.object(isolation.os, "scandir", side_effect=PermissionError("x")):
+            self.assertEqual(isolation.work_changes(w, before), self.HEAD + "the folder could not be read again (PermissionError)")
+        self.assertEqual(isolation.work_changes(w, before), "")
+
+    def test_wasm_restores_the_recorded_modes(self):
+        """the wasm engine makes the folder 0555 and the files 0444 for the run: after it they get back their recorded
+        modes (0.3.0 and the change before: folder 0755, files 0644), so an unchanged run is not an ERROR; the copy of
+        stderr.txt into the work folder is not made through a link put there"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if os.name != "posix":
+            self.skipTest("POSIX modes")
+        for planted in (None, "symlink"):
+            w, outdir = tempfile.mkdtemp(dir=self.d), tempfile.mkdtemp(dir=self.d)
+            for n, mode in (("request.json", 0o600), (isolation.RUNNER_NAME, 0o640), ("output.json", 0o604)):
+                open(os.path.join(w, n), "w").close()
+                os.chmod(os.path.join(w, n), mode)
+            open(os.path.join(outdir, "output.json"), "w").close()
+
+            def fake_run(cmd, timeout, stderr_path, env, w=w, planted=planted):
+                with open(stderr_path, "wb") as f:
+                    f.write(b"wasm stderr\n")
+                if planted:
+                    os.chmod(w, 0o700)
+                    os.unlink(os.path.join(w, "stderr.txt"))
+                    os.symlink(self.victim, os.path.join(w, "stderr.txt"))
+                return 0, False
+            facts = {"exe": "wasmtime", "folder": self.d, "version": [3, 12], "numpy": "-"}
+            with mock.patch.object(isolation, "probe", return_value=facts), mock.patch.object(isolation, "_run", fake_run):
+                rc, timed_out, descr, limit = isolation.run("wasm", w, os.path.join(outdir, "output.json"), 1, 1, [])
+            if planted:
+                self.assertTrue(limit.startswith(self.HEAD + "'stderr.txt': kind changed"), limit)
+                with open(self.victim) as f:
+                    self.assertEqual(f.read(), "SECRET-OF-THE-USER\n")
+            else:
+                self.assertEqual(limit, "")
+                self.assertEqual(stat.S_IMODE(os.lstat(w).st_mode), 0o700)
+                self.assertEqual([stat.S_IMODE(os.lstat(os.path.join(w, n)).st_mode) for n in
+                                  ("request.json", isolation.RUNNER_NAME, "output.json")], [0o600, 0o640, 0o604])
+                with open(os.path.join(w, "stderr.txt"), "rb") as f:
+                    self.assertEqual(f.read(), b"wasm stderr\n")
+
+    def test_copy_of_stderr_into_the_work_folder(self):
+        """the destination is written only as a regular file with one name, from its start, never through a link"""
+        from rigorous_levels import isolation
+        src, dst = os.path.join(self.d, "src"), os.path.join(self.d, "dst")
+        with open(src, "wb") as f:
+            f.write(b"short\n")
+        with open(dst, "wb") as f:
+            f.write(b"an older and longer content\n")
+        isolation._copy_run_stderr(src, dst)
+        with open(dst, "rb") as f:
+            self.assertEqual(f.read(), b"short\n")                 # truncated through the descriptor
+        bad = []
+        if hasattr(os, "link"):
+            bad.append(lambda: os.link(self.victim, dst))
+        if hasattr(os, "symlink") and os.name == "posix":
+            bad.append(lambda: os.symlink(self.victim, dst))
+        if hasattr(os, "mkfifo"):
+            bad.append(lambda: os.mkfifo(dst))
+        for make in bad:
+            os.unlink(dst)
+            make()
+            isolation._copy_run_stderr(src, dst)                  # no exception, nothing written
+            with open(self.victim, "rb") as f:
+                self.assertEqual(f.read(), b"SECRET-OF-THE-USER\n")
+        os.unlink(dst)
+
+    def test_wasm_sets_the_mode_back_only_on_the_recorded_file(self):
+        """a file put in place of a recorded one during the run keeps its own mode (and the check names the change)"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if os.name != "posix":
+            self.skipTest("POSIX modes")
+        w, outdir = tempfile.mkdtemp(dir=self.d), tempfile.mkdtemp(dir=self.d)
+        for n in ("request.json", isolation.RUNNER_NAME, "output.json"):
+            open(os.path.join(w, n), "w").close()
+            os.chmod(os.path.join(w, n), 0o644)
+        open(os.path.join(outdir, "output.json"), "w").close()
+        other = os.path.join(self.d, "other")
+
+        def fake_run(cmd, timeout, stderr_path, env):
+            open(stderr_path, "wb").close()
+            with open(other, "w") as f:
+                f.write("{}")
+            os.chmod(other, 0o600)
+            os.chmod(w, 0o700)
+            os.replace(other, os.path.join(w, "request.json"))
+            os.chmod(w, 0o555)
+            return 0, False
+        facts = {"exe": "wasmtime", "folder": self.d, "version": [3, 12], "numpy": "-"}
+        with mock.patch.object(isolation, "probe", return_value=facts), mock.patch.object(isolation, "_run", fake_run):
+            limit = isolation.run("wasm", w, os.path.join(outdir, "output.json"), 1, 1, [])[3]
+        self.assertTrue(limit.startswith(self.HEAD + "'request.json': mode 0o644 -> 0o600, inode changed"), limit)
+        self.assertEqual(stat.S_IMODE(os.lstat(os.path.join(w, "request.json")).st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(os.lstat(os.path.join(w, isolation.RUNNER_NAME)).st_mode), 0o644)   # control
+
+    def test_real_engines_leave_the_folder_unchanged(self):
+        """with every engine whose probe passes here, a run that changes nothing is not an ERROR of §6.7"""
+        if not NUMPY_ENGINES and "wasm" not in ENGINES_OK:
+            self.skipTest("no isolation engine on this machine: " + "; ".join(f"{k}: {v}" for k, v in ENGINES_WHY.items())[:300])
+        for e in ENGINES_OK:
+            with self.subTest(engine=e):
+                u = MP.run_port(request("test_wrong" if e != "wasm" else "python_rotor"), engine=e)
+                self.assertNotIn("work folder changed", u.reason)
+                if e != "wasm":
+                    self.assertEqual(u.state, "OK", u)
 
 
 if __name__ == "__main__":
