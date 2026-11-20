@@ -3,6 +3,40 @@
 All dates are from the author's system clock (Europe/Rome). Releases: 0.3.0 on 2026-11-12 (GitHub release with attested wheel and sdist; not on PyPI). 0.1.0 and 0.2.0 were never
 released.
 
+## Unreleased
+
+### The wasm engine no longer changes the mode of what a link in the work folder names (2026-11-20)
+
+`isolation._run_wasm` made the files of the work folder read-only for the run (0444) and writable after it (0644)
+with `os.chmod` on every name `os.walk` lists among the files. `os.walk` lists a symbolic link to a file among the
+files and `os.chmod` follows it. Measured on 0.3.0 with the engine replaced (probe and `_run` substituted, the link
+planted the way a run able to write into `/work` would plant it): a link in the work folder to a 0600 file of the user
+left that file 0644; a dangling link made the run end with `FileNotFoundError`. The work folder is made 0555 for the
+run, so a run under a user without the right to write there cannot plant a link; a run as root can.
+
+Now the mode is changed only for a regular file: the name is checked with `lstat`, opened with `O_NOFOLLOW` and
+`O_NONBLOCK`, and changed with `fchmod` on the descriptor only if it is the same regular file (device and inode);
+a link, a FIFO, a socket or a device is left as it is (`lstat` + `chmod` where `O_NOFOLLOW` or `os.fchmod` is
+missing: Windows). `tests/test_multiport.py` `TestWasmChmodNoFollow20261120`: six kinds of entry planted before or
+during the run, four names swapped in after the check, and the calls made (3 tests; on the code of 0.3.0 the 12
+cases of the first give 2 failures, the link to a file, and 2 errors, the dangling link, and the other two fail
+because the checked change does not exist there). 11 mutants of the changed lines, 11 killed.
+
+Review of the same day, with the engine replaced in the same way. A hard link is a regular file: a hard link in the work
+folder to a 0600 file of the user still left that file 0644 with the change above, so a file with more than one name
+(`st_nlink != 1`, at the `lstat` and at the `fstat`) is left as it is too; the files the library puts in the work folder
+have one name. And `_run_wasm` copied `stderr.txt` out of the folder the run can write (`/out`) with `shutil.copy`: with
+that name replaced by a symbolic link to a file of the user, the file's bytes were copied (the last 600 go into the
+reason of an output without levels); with the name removed, or replaced by a folder or a FIFO, `FileNotFoundError`,
+`IsADirectoryError` or `shutil.SpecialFileError` left `_run_wasm`. Now `_copy_run_stderr` reads it only as a regular
+file with one name (`lstat`, `O_NOFOLLOW | O_NONBLOCK`, the same device and inode) and otherwise writes one line, "the
+stderr file of the run was not read", with the reason. `TestWasmHardLinkAndStderr20261120` (4 tests: a hard link planted
+before or during the run, a second name made after the `lstat`, six replacements of `stderr.txt`, the same without
+`O_NOFOLLOW` and with the name swapped after the `lstat`); on the code of the change above the first three
+fail (9 failures with the sub-cases: 2, 1 and 6) and the fourth ends in an error (`_copy_run_stderr` is not there). 13
+mutants of the lines of this review, 13 killed. Not measured: whether a WASI guest under wasmtime can make such links or
+remove that file (wasmtime is not installed where this was measured).
+
 ## 0.3.0 — 2026-11-12 (first release; developed on branch dev-0.3 from 7beff99 since 2026-11-11)
 
 ### Name (2026-11-12)

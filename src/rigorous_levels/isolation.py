@@ -922,6 +922,72 @@ def _probe_wasm() -> Dict[str, object]:
     return facts
 
 
+def _chmod_regular_file(path: str, mode: int) -> None:
+    """chmod of a regular file of the work folder that has this one name, never of what a link names: os.walk lists a
+    symbolic link to a file among the files, and os.chmod follows it (0.3.0: a link planted in the work folder, pointing
+    at a 0600 file of the user, left that file 0644 after the run); a hard link to that file is a regular file whose
+    mode is the mode of the file outside (measured on the first version of this function: the file was left 0644), so
+    a file with more than one name (st_nlink != 1) is left as it is too. A symbolic link, a FIFO, a socket or a device
+    is left as it is; the file is opened with O_NOFOLLOW and changed through its descriptor, so a name swapped between
+    the check and the change is not followed either (lstat + chmod where os.fchmod or O_NOFOLLOW is missing:
+    Windows). The files the library puts in the work folder have one name."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+        return
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow or not hasattr(os, "fchmod"):
+        os.chmod(path, mode)
+        return
+    try:
+        fd = os.open(path, os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+    except OSError:
+        return                                   # a link put there after the lstat (ELOOP), or a file gone
+    try:
+        fs = os.fstat(fd)
+        if stat.S_ISREG(fs.st_mode) and fs.st_nlink == 1 and (fs.st_dev, fs.st_ino) == (st.st_dev, st.st_ino):
+            os.fchmod(fd, mode)
+    finally:
+        os.close(fd)
+
+
+def _copy_run_stderr(src: str, dst: str) -> None:
+    """Copies the stderr file of a wasm run from the folder the run can write (/out) to `dst`, only if it is a regular
+    file with this one name: lstat, open with O_NOFOLLOW | O_NONBLOCK, the same file by device and inode, then the
+    bytes read through the descriptor. Anything else there (a symbolic or hard link, a FIFO, a folder, a device,
+    nothing) is not read: `dst` then holds one line saying so. Measured on 0.3.0 with the engine replaced: with
+    stderr.txt replaced by a link to a file of the user, shutil.copy copied that file's bytes (their last 600 go into
+    the reason of an output without levels); removed, or replaced by a folder or a FIFO, FileNotFoundError,
+    IsADirectoryError or shutil.SpecialFileError left _run_wasm."""
+    why = ""
+    fd = -1
+    try:
+        st = os.lstat(src)
+        if not stat.S_ISREG(st.st_mode):
+            why = "not a regular file"
+        else:
+            fd = os.open(src, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                         | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
+            fs = os.fstat(fd)
+            if not (stat.S_ISREG(fs.st_mode) and fs.st_nlink == 1 and (fs.st_dev, fs.st_ino) == (st.st_dev, st.st_ino)):
+                why = "not a regular file with one name, or changed between the check and the open"
+    except OSError as e:
+        why = type(e).__name__
+    try:
+        with open(dst, "wb") as out:
+            if why:
+                out.write(f"[rigorous-levels] the stderr file of the run was not read: {why}\n".encode("utf-8"))
+            else:
+                with os.fdopen(fd, "rb") as f:
+                    fd = -1
+                    shutil.copyfileobj(f, out)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
 def _run_wasm(work: str, out_path: str, seconds: int, site_packages: List[str], stderr_path: str):
     facts = probe("wasm")
     # the output file must be writable: WASI pre-opens folders, so the work folder is pre-opened read-only and the
@@ -932,7 +998,7 @@ def _run_wasm(work: str, out_path: str, seconds: int, site_packages: List[str], 
     # The work folder is made non-writable for the run (pre-opens are read-write) and restored for the cleanup.
     for root, dirs, files in os.walk(work):
         for n in files:
-            os.chmod(os.path.join(root, n), 0o444)
+            _chmod_regular_file(os.path.join(root, n), 0o444)
     os.chmod(work, 0o555)
     cmd = _wasm_cmd(facts["exe"], facts["folder"], [(work, "/work"), (outdir, "/out")],
                     seconds, {"HOME": "/nohome", "RIGOROUS_LEVELS_OUTPUT_DIR": "/out"})
@@ -943,8 +1009,8 @@ def _run_wasm(work: str, out_path: str, seconds: int, site_packages: List[str], 
         os.chmod(work, 0o755)
         for root, dirs, files in os.walk(work):
             for n in files:
-                os.chmod(os.path.join(root, n), 0o644)
-    shutil.copy(os.path.join(outdir, "stderr.txt"), stderr_path)
+                _chmod_regular_file(os.path.join(root, n), 0o644)
+    _copy_run_stderr(os.path.join(outdir, "stderr.txt"), stderr_path)
     return rc, timed_out, (f"wasmtime (WASI, no sockets, pre-opened folders only, max memory {WASM_MAX_MEMORY >> 20} MiB); "
                            f"CPython {facts['version'][0]}.{facts['version'][1]} for WASI: numpy {facts['numpy']}")
 

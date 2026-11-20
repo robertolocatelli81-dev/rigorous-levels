@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1308,6 +1309,375 @@ class TestEngineSelection(unittest.TestCase):
     def test_unknown_engine_refused(self):
         with self.assertRaises(MP.OutOfDomain):
             MP.run_port(request("numpy_rotor"), engine="chroot")
+
+
+class TestWasmChmodNoFollow20261120(unittest.TestCase):
+    """0.3.0: _run_wasm made the work folder's files 0444 for the run and 0644 after it with os.chmod, which follows a
+    symbolic link (os.walk lists a link to a file among the files): a link in the work folder pointing at a 0600 file
+    of the user left that file 0644. The engine is replaced (probe and _run): every kind of entry, planted before the
+    run or by the run itself, must leave what lies outside the work folder as it was."""
+
+    def _one(self, kind, when):
+        from unittest import mock
+        d = tempfile.mkdtemp()
+        try:
+            victim, vdir = os.path.join(d, "victim"), os.path.join(d, "vdir")
+            with open(victim, "w") as f:
+                f.write("x")
+            os.mkdir(vdir)
+            os.chmod(victim, 0o600)
+            os.chmod(vdir, 0o700)
+            work, outdir = os.path.join(d, "work"), os.path.join(d, "out")
+            os.mkdir(work)
+            os.mkdir(outdir)
+            with open(os.path.join(work, "request.json"), "w") as f:
+                f.write("{}")
+            open(os.path.join(outdir, "output.json"), "wb").close()
+
+            def plant():
+                p = os.path.join(work, "entry")
+                if kind == "link_file":
+                    os.symlink(victim, p)
+                elif kind == "link_dir":
+                    os.symlink(vdir, p)
+                elif kind == "link_dangling":
+                    os.symlink(os.path.join(d, "nothing"), p)
+                elif kind == "link_inside":
+                    os.symlink(os.path.join(work, "request.json"), p)
+                elif kind == "fifo":
+                    os.mkfifo(p)
+                else:
+                    with open(p, "w") as f:
+                        f.write("y")
+            modes_during = {}
+
+            def fake_run(cmd, timeout, stderr_path, env):
+                open(stderr_path, "wb").close()
+                modes_during["request"] = stat.S_IMODE(os.stat(os.path.join(work, "request.json")).st_mode)
+                if when == "during":
+                    os.chmod(work, 0o755)
+                    plant()
+                    os.chmod(work, 0o555)
+                return 0, False
+            if when == "before":
+                plant()
+            facts = {"exe": "wasmtime", "folder": d, "version": [3, 12], "numpy": "-"}
+            with mock.patch.object(isolation, "probe", return_value=facts), mock.patch.object(isolation, "_run", fake_run):
+                isolation._run_wasm(work, os.path.join(outdir, "output.json"), 1, [], os.path.join(d, "stderr_copy.txt"))
+            return (stat.S_IMODE(os.stat(victim).st_mode), stat.S_IMODE(os.stat(vdir).st_mode), modes_during["request"],
+                    stat.S_IMODE(os.stat(os.path.join(work, "request.json")).st_mode))
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_every_kind_of_entry(self):
+        d = tempfile.mkdtemp()
+        try:
+            os.symlink(d, os.path.join(d, "l"))
+            links = True
+        except (OSError, NotImplementedError):                  # Windows without the right to make links
+            links = False
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        kinds = ["regular"] + (["link_file", "link_dir", "link_dangling", "link_inside"] if links else []) \
+            + (["fifo"] if hasattr(os, "mkfifo") else [])
+        n = 0
+        for kind in kinds:
+            for when in ("before", "during"):
+                with self.subTest(kind=kind, when=when):
+                    self.assertEqual(self._one(kind, when), (0o600, 0o700, 0o444, 0o644))
+                n += 1
+        self.assertEqual(n, 2 * len(kinds))
+        if os.name == "posix":
+            self.assertEqual(len(kinds), 6)                     # on POSIX no kind may drop out
+
+    def test_name_swapped_after_lstat_is_not_followed(self):
+        """the name is checked with lstat, then opened with O_NOFOLLOW | O_NONBLOCK and changed through the descriptor
+        only if it is the same regular file: a link, a hard link to another file or a FIFO put there in between (and a
+        descriptor that is not a regular file) is left alone, and nothing blocks"""
+        if not (getattr(os, "O_NOFOLLOW", 0) and hasattr(os, "fchmod") and hasattr(os, "mkfifo")):
+            self.skipTest("no O_NOFOLLOW / fchmod / mkfifo here: lstat + chmod")
+        import threading
+        from unittest import mock
+        for swap in ("symlink", "hardlink", "fifo", "fstat_not_regular"):
+            d = tempfile.mkdtemp()
+            try:
+                victim, p = os.path.join(d, "victim"), os.path.join(d, "f")
+                for q in (victim, p):
+                    with open(q, "w") as f:
+                        f.write("x")
+                os.chmod(victim, 0o600)
+                os.chmod(p, 0o600)
+                real_lstat, real_fstat = os.lstat, os.fstat
+
+                def lstat_then_swap(path, *a, **k):
+                    st = real_lstat(path, *a, **k)
+                    if path == p and swap != "fstat_not_regular":
+                        os.unlink(p)
+                        {"symlink": lambda: os.symlink(victim, p), "hardlink": lambda: os.link(victim, p),
+                         "fifo": lambda: os.mkfifo(p)}[swap]()
+                    return st
+
+                def fstat_fifo(fd):
+                    st = real_fstat(fd)
+                    return os.stat_result((stat.S_IFIFO | 0o600,) + tuple(st)[1:])
+                done = []
+
+                def call():
+                    with mock.patch.object(isolation.os, "lstat", lstat_then_swap), \
+                            mock.patch.object(isolation.os, "fstat", fstat_fifo if swap == "fstat_not_regular" else real_fstat):
+                        isolation._chmod_regular_file(p, 0o644)
+                    done.append(True)
+                t = threading.Thread(target=call, daemon=True)
+                t.start()
+                t.join(10)
+                with self.subTest(swap=swap):
+                    self.assertEqual(done, [True], "blocked on the name swapped in")
+                    self.assertEqual(stat.S_IMODE(real_lstat(victim).st_mode), 0o600)
+                    if swap == "fstat_not_regular":
+                        self.assertEqual(stat.S_IMODE(real_lstat(p).st_mode), 0o600)
+            finally:
+                if os.path.exists(p) and stat.S_ISFIFO(os.lstat(p).st_mode):
+                    os.unlink(p)
+                shutil.rmtree(d, ignore_errors=True)
+
+    def test_opens_only_regular_files_never_following_and_changes_through_the_descriptor(self):
+        """a name gone before the lstat is skipped; os.open is called only on regular files, always with O_NOFOLLOW;
+        a link swapped in after the fstat is not what changes (the change goes through the descriptor)"""
+        if not (getattr(os, "O_NOFOLLOW", 0) and hasattr(os, "fchmod") and hasattr(os, "mkfifo")):
+            self.skipTest("no O_NOFOLLOW / fchmod / mkfifo here: lstat + chmod")
+        from unittest import mock
+        d = tempfile.mkdtemp()
+        try:
+            isolation._chmod_regular_file(os.path.join(d, "gone"), 0o644)        # no exception
+            victim = os.path.join(d, "victim")
+            with open(victim, "w") as f:
+                f.write("x")
+            os.chmod(victim, 0o600)
+            names = {}
+            for kind in ("regular", "link", "fifo"):
+                q = os.path.join(d, kind)
+                if kind == "regular":
+                    with open(q, "w") as f:
+                        f.write("y")
+                elif kind == "link":
+                    os.symlink(victim, q)
+                else:
+                    os.mkfifo(q)
+                names[kind] = q
+            opened, real_open = [], os.open
+
+            def rec_open(path, flags, *a, **k):
+                opened.append((path, flags))
+                return real_open(path, flags, *a, **k)
+            with mock.patch.object(isolation.os, "open", rec_open):
+                for q in names.values():
+                    isolation._chmod_regular_file(q, 0o640)
+            self.assertEqual([x[0] for x in opened], [names["regular"]])
+            self.assertTrue(all(fl & os.O_NOFOLLOW for _, fl in opened))
+            self.assertEqual(stat.S_IMODE(os.stat(names["regular"]).st_mode), 0o640)
+            # swap after the fstat: the regular file becomes a link to the victim before the change
+            real_fstat, q = os.fstat, names["regular"]
+
+            def fstat_then_swap(fd):
+                st = real_fstat(fd)
+                os.unlink(q)
+                os.symlink(victim, q)
+                return st
+            with mock.patch.object(isolation.os, "fstat", fstat_then_swap):
+                isolation._chmod_regular_file(q, 0o644)
+            self.assertEqual(stat.S_IMODE(os.stat(victim).st_mode), 0o600)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+class TestWasmHardLinkAndStderr20261120(unittest.TestCase):
+    """Review of the change above (20/11/2026), the engine replaced in the same way. A HARD link in the work folder to a
+    0600 file of the user is a regular file: the first version of _chmod_regular_file left that file 0644. And the
+    folder the run can write (/out) holds stderr.txt, which _run_wasm copied with shutil.copy: a link there was
+    followed (the user's file copied), and a missing file, a folder or a FIFO raised out of _run_wasm."""
+
+    def _run(self, plant_work=None, plant_out=None, before=None):
+        from unittest import mock
+        from rigorous_levels import isolation
+        d = tempfile.mkdtemp()
+        try:
+            victim = os.path.join(d, "victim")
+            with open(victim, "w") as f:
+                f.write("SECRET-OF-THE-USER\n")
+            os.chmod(victim, 0o600)
+            work, outdir = os.path.join(d, "work"), os.path.join(d, "out")
+            os.mkdir(work)
+            os.mkdir(outdir)
+            with open(os.path.join(work, "request.json"), "w") as f:
+                f.write("{}")
+            open(os.path.join(outdir, "output.json"), "wb").close()
+            if before:
+                before(work, victim)
+
+            def fake_run(cmd, timeout, stderr_path, env):
+                with open(stderr_path, "wb") as f:
+                    f.write(b"true stderr\n")
+                if plant_work:
+                    os.chmod(work, 0o755)
+                    plant_work(work, victim)
+                    os.chmod(work, 0o555)
+                if plant_out:
+                    plant_out(outdir, victim)
+                return 0, False
+            copy = os.path.join(d, "stderr_copy.txt")
+            facts = {"exe": "wasmtime", "folder": d, "version": [3, 12], "numpy": "-"}
+            with mock.patch.object(isolation, "probe", return_value=facts), mock.patch.object(isolation, "_run", fake_run):
+                isolation._run_wasm(work, os.path.join(outdir, "output.json"), 1, [], copy)
+            with open(copy, "rb") as f:
+                copied = f.read()
+            return (stat.S_IMODE(os.stat(victim).st_mode), stat.S_IMODE(os.stat(os.path.join(work, "request.json")).st_mode), copied)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_control_and_hard_link_in_the_work_folder(self):
+        self.assertEqual(self._run(), (0o600, 0o644, b"true stderr\n"))
+        if not hasattr(os, "link"):
+            self.skipTest("no os.link here")
+        hard = lambda w, v: os.link(v, os.path.join(w, "hl"))        # noqa: E731
+        for when in ("before", "during"):
+            with self.subTest(when=when):
+                r = self._run(before=hard) if when == "before" else self._run(plant_work=hard)
+                self.assertEqual(r, (0o600, 0o644, b"true stderr\n"))
+
+    def test_second_name_made_after_the_lstat(self):
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not (getattr(os, "O_NOFOLLOW", 0) and hasattr(os, "fchmod") and hasattr(os, "link")):
+            self.skipTest("no O_NOFOLLOW / fchmod / link here")
+        d = tempfile.mkdtemp()
+        try:
+            p, other = os.path.join(d, "f"), os.path.join(d, "second_name")
+            with open(p, "w") as f:
+                f.write("x")
+            os.chmod(p, 0o600)
+            real_lstat = os.lstat
+
+            def lstat_then_second_name(path, *a, **k):       # one name at the lstat, two at the fstat
+                st = real_lstat(path, *a, **k)
+                if path == p and not os.path.exists(other):
+                    os.link(p, other)
+                return st
+            with mock.patch.object(isolation.os, "lstat", lstat_then_second_name):
+                isolation._chmod_regular_file(p, 0o644)
+            self.assertEqual(stat.S_IMODE(real_lstat(p).st_mode), 0o600)
+            os.unlink(other)
+            isolation._chmod_regular_file(p, 0o640)             # control: with one name the mode changes
+            self.assertEqual(stat.S_IMODE(real_lstat(p).st_mode), 0o640)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_stderr_of_the_run_is_read_only_as_a_regular_file_with_one_name(self):
+        note = b"[rigorous-levels] the stderr file of the run was not read: "
+        err = lambda o: os.path.join(o, "stderr.txt")               # noqa: E731
+
+        def swap(make):
+            def f(o, v):
+                os.remove(err(o))
+                make(o, v)
+            return f
+        not_regular, two_names = b"not a regular file\n", b"not a regular file with one name, or changed between the check and the open\n"
+        cases = {"removed": (swap(lambda o, v: None), b"FileNotFoundError\n"), "folder": (swap(lambda o, v: os.mkdir(err(o))), not_regular)}
+        d = tempfile.mkdtemp()
+        try:
+            os.symlink(d, os.path.join(d, "l"))
+            cases["symlink"] = (swap(lambda o, v: os.symlink(v, err(o))), not_regular)
+            cases["symlink_dangling"] = (swap(lambda o, v: os.symlink(os.path.join(o, "nothing"), err(o))), not_regular)
+        except (OSError, NotImplementedError):                      # Windows without the right to make links
+            pass
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        if hasattr(os, "link"):
+            cases["hard_link"] = (swap(lambda o, v: os.link(v, err(o))), two_names)
+        if hasattr(os, "mkfifo"):
+            cases["fifo"] = (swap(lambda o, v: os.mkfifo(err(o))), not_regular)
+        if os.name == "posix":
+            self.assertEqual(len(cases), 6)                         # on POSIX no case may drop out
+        import threading
+        for name, (plant, why) in cases.items():
+            got = []
+            t = threading.Thread(target=lambda: got.append(self._run(plant_out=plant)), daemon=True)
+            t.start()
+            t.join(20)
+            with self.subTest(case=name):
+                self.assertEqual(len(got), 1, "blocked, or an exception left _run_wasm")
+                mode, _, copied = got[0]
+                self.assertEqual(mode, 0o600)
+                self.assertNotIn(b"SECRET", copied)
+                self.assertEqual(copied, note + why)
+
+    def test_where_o_nofollow_is_missing_and_a_name_swapped_after_the_lstat(self):
+        """without O_NOFOLLOW (Windows) the lstat decides: a symbolic or hard link is not changed and not read; and the
+        file opened must be the one the lstat saw, still a regular file"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not (hasattr(os, "symlink") and hasattr(os, "link") and os.name == "posix"):
+            self.skipTest("links needed")
+        note = b"[rigorous-levels] the stderr file of the run was not read: "
+        d = tempfile.mkdtemp()
+        try:
+            victim, reg, hl, sl, dst = (os.path.join(d, n) for n in ("victim", "reg", "hl", "sl", "dst"))
+            with open(victim, "w") as f:
+                f.write("SECRET-OF-THE-USER\n")
+            with open(reg, "w") as f:
+                f.write("true stderr\n")
+            os.chmod(victim, 0o600)
+            os.chmod(reg, 0o600)
+            os.link(victim, hl)
+            os.symlink(victim, sl)
+            real_lstat, real_fstat = os.lstat, os.fstat
+
+            def read(src):
+                isolation._copy_run_stderr(src, dst)
+                with open(dst, "rb") as f:
+                    return f.read()
+            opened, real_open = [], os.open
+
+            def rec_open(path, flags, *a, **k):
+                opened.append(flags)
+                return real_open(path, flags, *a, **k)
+            with mock.patch.object(isolation.os, "open", rec_open):
+                self.assertEqual(read(reg), b"true stderr\n")
+            self.assertEqual(len(opened), 1)
+            self.assertTrue(opened[0] & os.O_NOFOLLOW and opened[0] & os.O_NONBLOCK, opened)
+            with mock.patch.object(isolation.os, "O_NOFOLLOW", 0):
+                for q in (hl, sl, reg):
+                    isolation._chmod_regular_file(q, 0o644)
+                self.assertEqual(stat.S_IMODE(real_lstat(victim).st_mode), 0o600)
+                self.assertEqual(stat.S_IMODE(real_lstat(reg).st_mode), 0o644)     # control
+                self.assertEqual(read(reg), b"true stderr\n")                      # control
+                for q in (sl, hl):
+                    got = read(q)
+                    self.assertTrue(got.startswith(note) and b"SECRET" not in got, got)
+
+                os.unlink(hl)                               # the victim has one name again
+
+                def lstat_then_link(path, *a, **k):         # a regular file at the lstat, a link to the victim at the open
+                    st = real_lstat(path, *a, **k)
+                    if path == reg:
+                        os.unlink(reg)
+                        os.symlink(victim, reg)
+                    return st
+                with mock.patch.object(isolation.os, "lstat", lstat_then_link):
+                    got = read(reg)
+                self.assertTrue(got.startswith(note) and b"SECRET" not in got, got)
+            os.unlink(reg)
+            with open(reg, "w") as f:
+                f.write("true stderr\n")
+
+            def fstat_fifo(fd):                             # the same inode, no longer a regular file
+                st = real_fstat(fd)
+                return os.stat_result((stat.S_IFIFO | 0o600,) + tuple(st)[1:])
+            with mock.patch.object(isolation.os, "fstat", fstat_fifo):
+                got = read(reg)
+            self.assertTrue(got.startswith(note), got)
+            self.assertEqual(read(reg), b"true stderr\n")                          # control
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
 
 
 if __name__ == "__main__":
