@@ -85,3 +85,4 @@ tests/test_determinism.py	46ce86b8e1b7d9f78e3cd1c124955fc4deff41528efc6f7c64f5bb
 requirements/build.txt	57a14d76b46d96e8e1b0dcaf5fda2e4d23658e5128fcae98c484f9346e749f18	new	-
 .github/CODEOWNERS	2b7ba13fdfb9133c6cd9de35eb72cd54fa31bbb077f0065b54d9b299487c2478	new	-
 .github/dependabot.yml	bdab339f6a179e49b0eb56d094d2aeb3c5127d84a04ee4861f8f6363286f84d1	new	-
+.github/workflows/pypi.yml	5d65561662bb27e01f32fbaa8a41a069f2f6d4de70bdbb63f5dd84d5ed180633	new	-
