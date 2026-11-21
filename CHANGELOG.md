@@ -1,6 +1,6 @@
 # Changelog
 
-All dates are from the author's system clock (Europe/Rome). Releases: 0.3.0 on 2026-11-12 (GitHub release with attested wheel and sdist; not on PyPI). 0.1.0 and 0.2.0 were never
+All dates are from the author's system clock (Europe/Rome). Releases: 0.3.0 on 2026-11-12 (GitHub release with attested wheel and sdist; on PyPI since 2026-11-14, the same files). 0.1.0 and 0.2.0 were never
 released.
 
 ## Unreleased
@@ -78,8 +78,9 @@ cases on Python 3.11 to 3.14, the timed and the concurrent runs on 3.11; §6.7 r
   (`REMOVE_SECONDS`, checked at each folder and each entry) and the folder stays: 30.0 s with such a process of 20 s.
 - the top folder left 000 got the owner's rwx with a chmod by name after an `lstat`: with the name swapped for a link
   between the two (it takes a process able to write in the temporary directory; measured with the swap injected), the
-  folder of the user the link named got the rwx. Now through an `O_PATH` descriptor opened with `O_NOFOLLOW`, as for
-  the folders inside.
+  folder of the user the link named got the rwx. Now, on Linux, through an `O_PATH` descriptor opened with
+  `O_NOFOLLOW`, as for the folders inside (macOS has no `O_PATH`: `fchmodat` by name without following a link, §6.7;
+  not measured).
 - a path given with a final `/` or `/.`, the top being a link to a folder of the user: what that folder held was
   removed (`shutil.rmtree` does the same; `run_port` and `run_ports` pass `mkdtemp` paths, which end with a name).
   Now a path whose last part is not a name is not removed.

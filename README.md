@@ -131,7 +131,7 @@ max(|a|, 1) for Mathieu; absolute 1e-10 GHz for the fluxonium); `WIDE` means val
 ## Install and use
 
 ```sh
-pip install --extra-index-url https://robertolocatelli81-dev.github.io/pypi/ rigorous-levels   # the release wheel, sha256-checked by pip
+pip install rigorous-levels      # from PyPI: the release wheel, uploaded by Trusted Publishing (PEP 740 attestations)
 # or, from a clone of this repository:
 pip install .                  # numpy, scipy, python-flint, sympy
 pip install ".[scqubits]"      # also the scqubits adapter
@@ -145,8 +145,10 @@ plus a CPython built for WASI in `RIGOROUS_LEVELS_PYTHON_WASM` (pure-Python port
 every engine binary must be owned by root and not writable by group or others; a binary you installed yourself (for
 example wasmtime unpacked in your home) is used only if you list its exact real path in `RIGOROUS_LEVELS_TRUSTED_ENGINES` (an
 entry that is relative, a symlink or not normalized vouches for nothing), and `Output.sandbox` then names it.
-Not on PyPI: the wheel and the sdist are attached to the GitHub release and listed with their sha256 in the
-author's static package index (PEP 503) above.
+On PyPI since 0.3.0 (uploaded on 14/11/2026 by Trusted Publishing from the GitHub Release): the files are the
+release's, checked against its `SHA256SUMS`, and carry PEP 740 attestations naming this repository's `pypi.yml`. The
+same files stay attached to the GitHub release and listed with their sha256 in the author's static package index
+(PEP 503): https://robertolocatelli81-dev.github.io/pypi/
 
 ```python
 from rigorous_levels import Rotor, guaranteed_levels, scqubits_spectrum, spectrum
