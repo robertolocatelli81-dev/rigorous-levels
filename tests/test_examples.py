@@ -16,13 +16,17 @@ SCQUBITS = importlib.util.find_spec("scqubits") is not None
 
 
 def run(script):
-    env = {"PATH": os.environ.get("PATH", ""), "HOME": tempfile.mkdtemp(prefix="home_example_"), "OMP_NUM_THREADS": "1"}
-    for k in ("PYTHONUSERBASE", "SYSTEMROOT", "TEMP", "TMP"):
-        if k in os.environ:
-            env[k] = os.environ[k]
-    if os.name == "nt":   # Windows has no password database: Path.home() needs USERPROFILE (qutip, imported by scqubits)
-        env["USERPROFILE"] = tempfile.mkdtemp(prefix="rigorous_levels_home_")
-    p = subprocess.run([sys.executable, "-I", "-B", str(EXAMPLES / script)], capture_output=True, text=True, timeout=900, env=env)
+    # the temporary HOME (and USERPROFILE) are removed after the script (21/11/2026: they were left in TMPDIR)
+    with tempfile.TemporaryDirectory(prefix="home_example_") as home, \
+            tempfile.TemporaryDirectory(prefix="rigorous_levels_home_") as profile:
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": home, "OMP_NUM_THREADS": "1"}
+        for k in ("PYTHONUSERBASE", "SYSTEMROOT", "TEMP", "TMP"):
+            if k in os.environ:
+                env[k] = os.environ[k]
+        if os.name == "nt":   # Windows has no password database: Path.home() needs USERPROFILE (qutip, imported by scqubits)
+            env["USERPROFILE"] = profile
+        p = subprocess.run([sys.executable, "-I", "-B", str(EXAMPLES / script)], capture_output=True, text=True, timeout=900,
+                           env=env)
     return p.returncode, p.stdout, p.stderr
 
 

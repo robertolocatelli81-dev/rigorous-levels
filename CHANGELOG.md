@@ -98,6 +98,23 @@ alone). Mutants of the lines of the removal and of the status time: 24 run, 23 k
 on the folder's time alone) is equivalent where `run()` calls it: no entry had a status time later than the folder's
 in 3 000 runs and in the 259 records made by the tests.
 
+Linux without `/proc` (2026-11-21, §6.7 first): there a folder left 000 (the top or one inside) stayed, because the
+only way to give it rwx without following a link was an `O_PATH` descriptor through `/proc/self/fd` (`os.chmod` is
+not in `os.supports_follow_symlinks` on Linux: Python 3.11 to 3.14, measured). Now `fchmodat2` with
+`AT_SYMLINK_NOFOLLOW` (Linux 6.6 and later; x86-64 measured here on 6.6.147, arm64 by the same system call number,
+not measured) through ctypes: measured with `/proc` hidden from the code, the top and an inner folder left 000 are
+removed, a link swapped in before that call is not followed (`EOPNOTSUPP`, the folder of the user stays 0500), and
+without `fchmodat2` either the folder stays and nothing raises (`test_removal_without_proc`,
+`test_owner_rwx_without_proc_exactly`: 0700 exactly on a folder 000, a file left as it is, `EOPNOTSUPP` on a link;
+`TestWorkFolderClosed20261120` has 31 tests). Mutants of the lines of this change and of the second review (the time
+cap, the path check, `fchmodat2`): 14 run, 11 killed at the first round; the 3 alive (the error of `fchmodat2`
+ignored, rwx given to all, a file given rwx) killed by the second of those tests.
+
+The tests left temporary homes in TMPDIR: the 20 modules of the CI on Python 3.11 in an empty TMPDIR left 12 folders
+(7 `home_prova_*` from `runner_direct` in `test_multiport.py`, 5 `home_example_*` from `test_examples.py`; measured on
+the tree before this change), and leave 0 now. The `linux` job of `ci.yml` runs the tests in an empty TMPDIR and fails
+if anything is left there but podman's own `containers-user-<uid>` folder.
+
 ### The wasm engine no longer changes the mode of what a link in the work folder names (2026-11-20)
 
 `isolation._run_wasm` made the files of the work folder read-only for the run (0444) and writable after it (0644)

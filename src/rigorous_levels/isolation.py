@@ -1321,8 +1321,10 @@ def _owner_rwx_unopened(name: str, dir_fd: Optional[int]) -> None:
     """Gives the folder `name` (in `dir_fd`; the top folder: None) the owner's rwx without following a link, when it
     cannot be opened. Never a chmod by name alone: between an lstat and that chmod the name can become a link
     (measured on the top folder, which was changed that way: the folder of the user the link named got the rwx).
-    Where neither way exists (Linux without /proc, when os.chmod is not in os.supports_follow_symlinks: Python 3.11
-    to 3.14 where this was measured) the folder is left as it is, and stays."""
+    Linux without /proc: the fchmodat2 system call with AT_SYMLINK_NOFOLLOW (Linux 6.6 and later; on a link it fails
+    with EOPNOTSUPP, so a link is never followed), through ctypes because os.chmod is not in
+    os.supports_follow_symlinks on Linux (Python 3.11 to 3.14 where this was measured). Where no way exists (an
+    older kernel without /proc: ENOSYS) the folder is left as it is, and stays."""
     if hasattr(os, "O_PATH") and os.path.isdir("/proc/self/fd"):
         pfd = os.open(name, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
         try:
@@ -1331,10 +1333,30 @@ def _owner_rwx_unopened(name: str, dir_fd: Optional[int]) -> None:
                 os.chmod(f"/proc/self/fd/{pfd}", stat.S_IMODE(st.st_mode) | 0o700)
         finally:
             os.close(pfd)
+    elif _FCHMODAT2 is not None:
+        st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        if stat.S_ISDIR(st.st_mode):
+            _fchmodat2_nofollow(name, dir_fd, stat.S_IMODE(st.st_mode) | 0o700)
     elif os.chmod in os.supports_follow_symlinks and os.chmod in os.supports_dir_fd:
         st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
         if stat.S_ISDIR(st.st_mode):
             os.chmod(name, stat.S_IMODE(st.st_mode) | 0o700, dir_fd=dir_fd, follow_symlinks=False)
+
+
+# fchmodat2 (Linux 6.6): the same number in the x86-64 table and in the generic table used by arm64
+_FCHMODAT2 = 452 if sys.platform.startswith("linux") and os.uname().machine in ("x86_64", "aarch64") else None
+
+
+def _fchmodat2_nofollow(name: str, dir_fd: Optional[int], mode: int) -> None:
+    """chmod of `name` (relative to `dir_fd`, or AT_FDCWD) that never follows a link: OSError otherwise."""
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    r = libc.syscall(ctypes.c_long(_FCHMODAT2), ctypes.c_int(-100 if dir_fd is None else dir_fd),
+                     ctypes.c_char_p(os.fsencode(name)), ctypes.c_uint(mode), ctypes.c_int(0x100))
+    if r != 0:
+        e = ctypes.get_errno()
+        raise OSError(e, os.strerror(e), name)
 
 
 def _open_dir(name: str, dir_fd: Optional[int]) -> int:

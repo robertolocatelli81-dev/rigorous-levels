@@ -208,8 +208,11 @@ levels use a regular file with one name only (`lstat`, then `O_NOFOLLOW`, then t
 `O_NOFOLLOW` is missing the `lstat` decides), the copy without `O_TRUNC`. The folder is then removed without
 following links and without recursion, also when the run left it or a folder inside it without the owner's read,
 write or search permission (POSIX with descriptors: each folder opened relative to its parent with
-`O_DIRECTORY | O_NOFOLLOW`, given the owner's rwx through a descriptor, never by name, the top folder included,
-the walk going back up through `..` only if it is the folder it came from; Windows: `shutil.rmtree`). A path whose
+`O_DIRECTORY | O_NOFOLLOW`, given the owner's rwx through a descriptor, never by name, the top folder included:
+an `O_PATH | O_NOFOLLOW` descriptor and `/proc/self/fd` on Linux; on Linux without `/proc` (rule added on 2026-11-21)
+the `fchmodat2` system call with `AT_SYMLINK_NOFOLLOW` (Linux 6.6 and later, x86-64 and arm64), which fails on a link
+instead of following it, and with an older kernel without `/proc` such a folder stays; macOS: `fchmodat` without
+following; the walk going back up through `..` only if it is the folder it came from; Windows: `shutil.rmtree`). A path whose
 last part is not a name (a final separator, `.` or `..`) is not removed: the system resolves a link there. The
 removal is tried again after 0.05, 0.1 and 0.2 s if the folder is still there (a process that outlived the run and
 still writes in it), and the whole removal stops 30 s after it began, checked at each folder and each entry; after

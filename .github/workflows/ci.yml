@@ -59,11 +59,15 @@ jobs:
         run: |
           case "${{ matrix.stack }}" in default) ;; unlimited) ulimit -s unlimited ;; *) ulimit -s ${{ matrix.stack }} ;; esac
           ulimit -s
+          export TMPDIR="$RUNNER_TEMP/suite_tmp"; rm -rf "$TMPDIR"; mkdir "$TMPDIR"   # the tests must leave it empty
           cd tests
           python -c 'import rigorous_levels; assert "site-packages" in rigorous_levels.__file__, rigorous_levels.__file__; print(rigorous_levels.__file__)'
           python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_readme_example test_spherical_rotor test_hyperfine_molecule test_inputs_review test_duffing_vs_transmon test_multiport test_port_centrex_tlf test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases test_spec_bounds test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           for e in bwrap podman docker; do grep -qE "^test_s1_rete_bloccata \\(test_multiport\\.TestSandbox_$e(\\.test_s1_rete_bloccata)?\\) \\.\\.\\. ok" ../unittest.log || { echo "engine $e: the S1 test did not run"; exit 1; }; done
+          # what the tests left in TMPDIR (podman's own containers-user-<uid> folder, made when XDG_RUNTIME_DIR is unset, is not theirs)
+          left=$(find "$TMPDIR" -mindepth 1 -maxdepth 1 ! -name 'containers-user-*' -printf '%f\n')
+          test -z "$left" || { echo "left in TMPDIR by the tests:"; echo "$left"; exit 1; }
       - name: Deprecated Italian aliases are the only source of DeprecationWarning (the English API is warning-free)
         run: |
           cd tests

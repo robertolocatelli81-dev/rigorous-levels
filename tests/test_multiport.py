@@ -64,11 +64,11 @@ def runner_direct(r, timeout=30):
     """Esegue il runner SENZA sandbox (solo nei test, come check positivo): ciò che qui riesce, dentro deve fallire.
     RIGOROUS_LEVELS_HOST_LIMITS=memory: fuori dalla sandbox nessuno impone la memoria, e macOS rifiuta RLIMIT_AS."""
     work = tempfile.mkdtemp(prefix="rigorous_levels_port_direct_")
+    home = tempfile.mkdtemp(prefix="home_prova_")          # removed below with the work folder (21/11: left behind)
     try:
         with open(os.path.join(work, "request.json"), "w") as f:
             json.dump(r.json(), f)
-        env = {"PATH": os.environ.get("PATH", ""), "HOME": tempfile.mkdtemp(prefix="home_prova_"),
-               "RIGOROUS_LEVELS_HOST_LIMITS": "memory"}
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": home, "RIGOROUS_LEVELS_HOST_LIMITS": "memory"}
         if os.name == "nt":
             env.update({k: os.environ[k] for k in WINDOWS_SYSTEM_ENV if k in os.environ})
         subprocess.run([sys.executable, "-I", "-B", str(MP.RUNNER), work], capture_output=True, text=True, timeout=timeout,
@@ -77,6 +77,7 @@ def runner_direct(r, timeout=30):
             return json.load(f)
     finally:
         shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(home, ignore_errors=True)
 
 
 class TestContrattoChiuso(unittest.TestCase):
@@ -2307,6 +2308,84 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
                 self.assertEqual([o.state for o in outs], ["ERROR"] * 2)
         self.assertEqual(sorted(os.listdir(vdir)), ["keep"])
         self.assertEqual(stat.S_IMODE(os.stat(vdir).st_mode), 0o700)
+
+    def test_removal_without_proc(self):
+        """Linux without /proc: folders left 000 (the top and inside) get the owner's rwx through fchmodat2 with
+        AT_SYMLINK_NOFOLLOW (Linux 6.6+) and are removed; a link swapped in before that call is not followed
+        (EOPNOTSUPP); without fchmodat2 either, the folder stays and nothing raises"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if isolation._FCHMODAT2 is None or not isolation._FD_REMOVAL:
+            self.skipTest("fchmodat2: Linux x86-64 / arm64 only")
+        real_isdir = os.path.isdir
+
+        def no_proc(p):
+            return False if str(p).startswith("/proc") else real_isdir(p)
+        vdir = os.path.join(self.d, "vdir")
+        os.mkdir(vdir)
+        os.chmod(vdir, 0o500)
+        for case in ("top", "inside"):
+            top = tempfile.mkdtemp(dir=self.d)
+            os.mkdir(os.path.join(top, "s"))
+            open(os.path.join(top, "s", "f"), "w").close()
+            os.chmod(os.path.join(top, "s"), 0o000)
+            if case == "top":
+                os.chmod(top, 0o000)
+            with self.subTest(case=case), mock.patch.object(isolation.os.path, "isdir", no_proc):
+                try:
+                    isolation.remove_tree(top)
+                except Exception as e:                                # noqa: BLE001
+                    self.fail(f"raised {e!r}")
+                self.assertFalse(os.path.lexists(top))
+        top = tempfile.mkdtemp(dir=self.d)
+        os.mkdir(os.path.join(top, "s"))
+        os.chmod(os.path.join(top, "s"), 0o000)
+        real_f2 = isolation._fchmodat2_nofollow
+
+        def swap_then(name, dir_fd, mode):                            # the name becomes a link to the user's folder
+            os.rename(os.path.join(top, "s"), os.path.join(top, "s_moved"))
+            os.symlink(vdir, os.path.join(top, "s"))
+            return real_f2(name, dir_fd, mode)
+        with mock.patch.object(isolation.os.path, "isdir", no_proc), \
+                mock.patch.object(isolation, "_fchmodat2_nofollow", swap_then), \
+                mock.patch.object(isolation, "REMOVE_PAUSES", ()):
+            isolation.remove_tree(top)
+        self.assertEqual(stat.S_IMODE(os.stat(vdir).st_mode), 0o500)     # never followed
+        with mock.patch.object(isolation.os.path, "isdir", no_proc), mock.patch.object(isolation, "_FCHMODAT2", None), \
+                mock.patch.object(isolation, "REMOVE_PAUSES", ()):
+            isolation.remove_tree(top)                                # no way at all: it stays, no exception
+        self.assertTrue(os.path.lexists(os.path.join(top, "s_moved")))
+        os.chmod(os.path.join(top, "s_moved"), 0o700)
+        isolation.remove_tree(top)                                    # control
+        self.assertFalse(os.path.lexists(top))
+
+    def test_owner_rwx_without_proc_exactly(self):
+        """without /proc: a folder 000 gets 0700 (the owner's rwx, nothing for others), a file is left as it is, and a
+        link makes fchmodat2 fail with EOPNOTSUPP"""
+        import errno
+        from unittest import mock
+        from rigorous_levels import isolation
+        if isolation._FCHMODAT2 is None:
+            self.skipTest("fchmodat2: Linux x86-64 / arm64 only")
+        real_isdir = os.path.isdir
+        no_proc = mock.patch.object(isolation.os.path, "isdir",
+                                    lambda p: False if str(p).startswith("/proc") else real_isdir(p))
+        d0, f, ln = os.path.join(self.d, "d0"), os.path.join(self.d, "f"), os.path.join(self.d, "ln")
+        os.mkdir(d0)
+        os.chmod(d0, 0o000)
+        with open(f, "w") as fh:
+            fh.write("x")
+        os.chmod(f, 0o600)
+        os.symlink(self.victim, ln)
+        with no_proc:
+            isolation._owner_rwx_unopened(d0, None)
+            isolation._owner_rwx_unopened(f, None)
+        self.assertEqual(stat.S_IMODE(os.lstat(d0).st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(os.lstat(f).st_mode), 0o600)
+        with self.assertRaises(OSError) as cm:
+            isolation._fchmodat2_nofollow(ln, None, 0o777)
+        self.assertEqual(cm.exception.errno, errno.EOPNOTSUPP)
+        self.assertEqual(stat.S_IMODE(os.stat(self.victim).st_mode), 0o600)
 
     def test_remove_tree_tries_again(self):
         """a first try that leaves the folder (a writer that outlived the run) is followed by the next ones"""
