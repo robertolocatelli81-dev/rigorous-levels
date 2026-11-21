@@ -2309,14 +2309,28 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(vdir)), ["keep"])
         self.assertEqual(stat.S_IMODE(os.stat(vdir).st_mode), 0o700)
 
+    def _needs_fchmodat2(self):
+        """skips where fchmodat2 is not called (not Linux x86-64 / arm64) or does not work (a kernel before 6.6, or a
+        system call filter that refuses it): there the folders stay, which the tests below would report as failures"""
+        from rigorous_levels import isolation
+        if isolation._FCHMODAT2 is None:
+            self.skipTest("fchmodat2: Linux x86-64 / arm64 only")
+        try:
+            isolation._fchmodat2_nofollow(self.d, None, stat.S_IMODE(os.stat(self.d).st_mode))
+        except OSError as e:
+            self.skipTest(f"fchmodat2 does not work here ({e.strerror}): Linux 6.6 and later")
+
     def test_removal_without_proc(self):
-        """Linux without /proc: folders left 000 (the top and inside) get the owner's rwx through fchmodat2 with
-        AT_SYMLINK_NOFOLLOW (Linux 6.6+) and are removed; a link swapped in before that call is not followed
-        (EOPNOTSUPP); without fchmodat2 either, the folder stays and nothing raises"""
+        """Linux without /proc: folders left 000 or 077 (the top and inside) get the owner's rwx through fchmodat2
+        (Linux 6.6+) on an O_PATH descriptor and are removed; what takes the name after that descriptor was opened
+        (a link to a folder of the user, a second name of a file of the user) is not changed; without fchmodat2
+        either, the folder stays and nothing raises"""
+        import errno
         from unittest import mock
         from rigorous_levels import isolation
-        if isolation._FCHMODAT2 is None or not isolation._FD_REMOVAL:
-            self.skipTest("fchmodat2: Linux x86-64 / arm64 only")
+        if not isolation._FD_REMOVAL:
+            self.skipTest("no removal with descriptors here")
+        self._needs_fchmodat2()
         real_isdir = os.path.isdir
 
         def no_proc(p):
@@ -2324,11 +2338,16 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
         vdir = os.path.join(self.d, "vdir")
         os.mkdir(vdir)
         os.chmod(vdir, 0o500)
-        for case in ("top", "inside"):
+        os.chmod(self.victim, 0o640)
+
+        def open_now():                                               # the descriptors of this process, where listed
+            return sorted(os.listdir("/dev/fd")) if real_isdir("/dev/fd") else None
+        open_before = open_now()
+        for case in ("top", "inside", "inside 077"):
             top = tempfile.mkdtemp(dir=self.d)
             os.mkdir(os.path.join(top, "s"))
             open(os.path.join(top, "s", "f"), "w").close()
-            os.chmod(os.path.join(top, "s"), 0o000)
+            os.chmod(os.path.join(top, "s"), 0o077 if case == "inside 077" else 0o000)
             if case == "top":
                 os.chmod(top, 0o000)
             with self.subTest(case=case), mock.patch.object(isolation.os.path, "isdir", no_proc):
@@ -2337,36 +2356,82 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
                 except Exception as e:                                # noqa: BLE001
                     self.fail(f"raised {e!r}")
                 self.assertFalse(os.path.lexists(top))
+        real_f2 = isolation._fchmodat2_nofollow
+        for kind, left in (("link", 0o000), ("second name", 0o000), ("second name", 0o077)):
+            top = tempfile.mkdtemp(dir=self.d)
+            os.mkdir(os.path.join(top, "s"))
+            os.chmod(os.path.join(top, "s"), left)
+            calls = []
+
+            def swap_then(name, dir_fd, mode):                        # the name becomes something of the user
+                calls.append(name)
+                os.rename(os.path.join(top, "s"), os.path.join(top, "s_moved"))
+                if kind == "link":
+                    os.symlink(vdir, os.path.join(top, "s"))
+                else:
+                    os.link(self.victim, os.path.join(top, "s"))
+                return real_f2(name, dir_fd, mode)
+            with self.subTest(kind=kind, left=left), mock.patch.object(isolation.os.path, "isdir", no_proc), \
+                    mock.patch.object(isolation, "_fchmodat2_nofollow", swap_then), \
+                    mock.patch.object(isolation, "REMOVE_PAUSES", ()):
+                isolation.remove_tree(top)
+                self.assertEqual(calls, [""])                         # on the descriptor, never by name
+                self.assertEqual(stat.S_IMODE(os.stat(vdir).st_mode), 0o500)
+                self.assertEqual(stat.S_IMODE(os.stat(self.victim).st_mode), 0o640)
+                self.assertEqual(stat.S_IMODE(os.lstat(os.path.join(top, "s_moved")).st_mode), left | 0o700)
+            isolation.remove_tree(top)
+            self.assertFalse(os.path.lexists(top))
+            self.assertEqual(os.stat(self.victim).st_nlink, 1)
         top = tempfile.mkdtemp(dir=self.d)
         os.mkdir(os.path.join(top, "s"))
         os.chmod(os.path.join(top, "s"), 0o000)
-        real_f2 = isolation._fchmodat2_nofollow
-
-        def swap_then(name, dir_fd, mode):                            # the name becomes a link to the user's folder
-            os.rename(os.path.join(top, "s"), os.path.join(top, "s_moved"))
-            os.symlink(vdir, os.path.join(top, "s"))
-            return real_f2(name, dir_fd, mode)
-        with mock.patch.object(isolation.os.path, "isdir", no_proc), \
-                mock.patch.object(isolation, "_fchmodat2_nofollow", swap_then), \
-                mock.patch.object(isolation, "REMOVE_PAUSES", ()):
-            isolation.remove_tree(top)
-        self.assertEqual(stat.S_IMODE(os.stat(vdir).st_mode), 0o500)     # never followed
         with mock.patch.object(isolation.os.path, "isdir", no_proc), mock.patch.object(isolation, "_FCHMODAT2", None), \
                 mock.patch.object(isolation, "REMOVE_PAUSES", ()):
             isolation.remove_tree(top)                                # no way at all: it stays, no exception
-        self.assertTrue(os.path.lexists(os.path.join(top, "s_moved")))
-        os.chmod(os.path.join(top, "s_moved"), 0o700)
-        isolation.remove_tree(top)                                    # control
+        self.assertEqual(stat.S_IMODE(os.lstat(os.path.join(top, "s")).st_mode), 0o000)
+        import builtins
+        real_import = builtins.__import__
+
+        def no_ctypes(name, *a, **k):
+            if name == "ctypes":
+                raise ImportError("No module named '_ctypes'")
+            return real_import(name, *a, **k)
+        with mock.patch.object(isolation.os.path, "isdir", no_proc), mock.patch.object(builtins, "__import__", no_ctypes), \
+                mock.patch.object(isolation, "REMOVE_PAUSES", ()):
+            try:
+                isolation.remove_tree(top)                            # no ctypes: it stays, no exception
+            except Exception as e:                                    # noqa: BLE001
+                self.fail(f"raised {e!r}")
+            with self.assertRaises(OSError) as cm:
+                isolation._fchmodat2_nofollow(top, None, 0o700)
+            self.assertEqual(cm.exception.errno, errno.ENOSYS)
+        self.assertEqual(stat.S_IMODE(os.lstat(os.path.join(top, "s")).st_mode), 0o000)
+        self.assertEqual(open_now(), open_before)                     # no descriptor left open
+        with mock.patch.object(isolation.os.path, "isdir", no_proc):
+            isolation.remove_tree(top)                                # control
         self.assertFalse(os.path.lexists(top))
 
+    def test_fchmodat2_only_where_its_number_was_read(self):
+        """the system call number is used on Linux x86-64 and arm64 only: elsewhere a table can give that number to
+        another system call (alpha: fchmodat2 is 562)"""
+        from rigorous_levels import isolation
+        number = isolation._fchmodat2_number
+        self.assertEqual([number("linux", m) for m in ("x86_64", "aarch64")], [452, 452])
+        for platform, machine in (("linux", "alpha"), ("linux", "riscv64"), ("linux", "ppc64le"), ("linux", "s390x"),
+                                  ("linux", "armv7l"), ("linux", "i686"), ("linux", "mips64"), ("linux", ""),
+                                  ("darwin", "x86_64"), ("darwin", "arm64"), ("win32", "AMD64"), ("win32", ""),
+                                  ("freebsd14", "amd64"), ("android", "aarch64"), ("", "x86_64")):
+            with self.subTest(platform=platform, machine=machine):
+                self.assertIsNone(number(platform, machine))
+        self.assertEqual(isolation._FCHMODAT2, number(sys.platform, os.uname().machine if hasattr(os, "uname") else ""))
+
     def test_owner_rwx_without_proc_exactly(self):
-        """without /proc: a folder 000 gets 0700 (the owner's rwx, nothing for others), a file is left as it is, and a
-        link makes fchmodat2 fail with EOPNOTSUPP"""
+        """without /proc: a folder 000 gets 0700 (the owner's rwx, nothing for others), a file and a link are refused
+        when the descriptor is opened, and fchmodat2 by name fails on a link with EOPNOTSUPP"""
         import errno
         from unittest import mock
         from rigorous_levels import isolation
-        if isolation._FCHMODAT2 is None:
-            self.skipTest("fchmodat2: Linux x86-64 / arm64 only")
+        self._needs_fchmodat2()
         real_isdir = os.path.isdir
         no_proc = mock.patch.object(isolation.os.path, "isdir",
                                     lambda p: False if str(p).startswith("/proc") else real_isdir(p))
@@ -2376,16 +2441,27 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
         with open(f, "w") as fh:
             fh.write("x")
         os.chmod(f, 0o600)
-        os.symlink(self.victim, ln)
+        os.symlink(self.d, ln)
+        before = stat.S_IMODE(os.stat(self.d).st_mode)
         with no_proc:
             isolation._owner_rwx_unopened(d0, None)
-            isolation._owner_rwx_unopened(f, None)
+            for other in (f, ln):
+                with self.assertRaises(OSError) as cm:
+                    isolation._owner_rwx_unopened(other, None)
+                self.assertEqual(cm.exception.errno, errno.ENOTDIR)
         self.assertEqual(stat.S_IMODE(os.lstat(d0).st_mode), 0o700)
         self.assertEqual(stat.S_IMODE(os.lstat(f).st_mode), 0o600)
-        with self.assertRaises(OSError) as cm:
-            isolation._fchmodat2_nofollow(ln, None, 0o777)
-        self.assertEqual(cm.exception.errno, errno.EOPNOTSUPP)
-        self.assertEqual(stat.S_IMODE(os.stat(self.victim).st_mode), 0o600)
+        dfd, cwd = os.open(self.d, os.O_RDONLY), os.getcwd()
+        try:
+            os.chdir(self.d)
+            for name, dir_fd in ((ln, None), ("ln", None), ("ln", dfd)):
+                with self.assertRaises(OSError) as cm:
+                    isolation._fchmodat2_nofollow(name, dir_fd, 0o777)
+                self.assertEqual(cm.exception.errno, errno.EOPNOTSUPP)
+        finally:
+            os.chdir(cwd)
+            os.close(dfd)
+        self.assertEqual(stat.S_IMODE(os.stat(self.d).st_mode), before)
 
     def test_remove_tree_tries_again(self):
         """a first try that leaves the folder (a writer that outlived the run) is followed by the next ones"""

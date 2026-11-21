@@ -1279,8 +1279,9 @@ def remove_tree(path: str) -> None:
     RecursionError out of run_port. Here (POSIX with descriptors: Linux, macOS) the tree is walked without recursion
     and with one descriptor open at a time: each folder is opened with O_DIRECTORY | O_NOFOLLOW relative to its
     parent, given the owner's rwx through that descriptor (Linux, when it cannot be opened for reading: through an
-    O_PATH descriptor and /proc/self/fd; macOS: fchmodat without following), emptied, and the walk goes back up
-    through ".." only if ".." is the folder it came from (device and inode). Elsewhere (Windows):
+    O_PATH descriptor and /proc/self/fd, or fchmodat2 where there is no /proc; macOS: fchmodat without following),
+    emptied, and the walk goes back up through ".." only if ".." is the folder it came from (device and inode).
+    Elsewhere (Windows):
     shutil.rmtree(ignore_errors=True), RecursionError caught. What a process still running writes there meanwhile
     (one that left the engine's process group: §6.3) can keep the folder from being removed: the removal is tried
     again after each of REMOVE_PAUSES seconds, then the folder stays. The whole call ends within REMOVE_SECONDS plus
@@ -1319,41 +1320,59 @@ _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLL
 
 def _owner_rwx_unopened(name: str, dir_fd: Optional[int]) -> None:
     """Gives the folder `name` (in `dir_fd`; the top folder: None) the owner's rwx without following a link, when it
-    cannot be opened. Never a chmod by name alone: between an lstat and that chmod the name can become a link
-    (measured on the top folder, which was changed that way: the folder of the user the link named got the rwx).
-    Linux without /proc: the fchmodat2 system call with AT_SYMLINK_NOFOLLOW (Linux 6.6 and later; on a link it fails
-    with EOPNOTSUPP, so a link is never followed), through ctypes because os.chmod is not in
-    os.supports_follow_symlinks on Linux (Python 3.11 to 3.14 where this was measured). Where no way exists (an
-    older kernel without /proc: ENOSYS) the folder is left as it is, and stays."""
-    if hasattr(os, "O_PATH") and os.path.isdir("/proc/self/fd"):
+    cannot be opened. On Linux never a chmod by name: between an lstat and that chmod the name can become something else
+    (measured on the top folder, changed by name after an lstat: the folder of the user a link named got the rwx;
+    measured on 2026-11-21 with fchmodat2 by name and AT_SYMLINK_NOFOLLOW: a link is refused, but a second name of a
+    file of the user put there after the lstat took the mode, 0640 to 0700, and to 0777 from a folder left 077).
+    Linux: an O_PATH | O_DIRECTORY | O_NOFOLLOW descriptor, its fstat, then the mode set on that descriptor: through
+    /proc/self/fd, or without /proc through the fchmodat2 system call with AT_EMPTY_PATH (Linux 6.6 and later),
+    called with ctypes because os.chmod is not in os.supports_follow_symlinks on Linux (Python 3.11 to 3.14 where
+    this was measured) and os.fchmod refuses an O_PATH descriptor. Where no way exists (an older kernel without
+    /proc: ENOSYS; no ctypes) the folder is left as it is, and stays. macOS has no O_PATH: there fchmodat by name
+    without following a link, after an lstat (a file put under that name in between would take the mode; not
+    measured on macOS)."""
+    by_proc = os.path.isdir("/proc/self/fd")
+    if hasattr(os, "O_PATH") and (by_proc or _FCHMODAT2 is not None):
         pfd = os.open(name, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
         try:
             st = os.fstat(pfd)
             if stat.S_ISDIR(st.st_mode):
-                os.chmod(f"/proc/self/fd/{pfd}", stat.S_IMODE(st.st_mode) | 0o700)
+                if by_proc:
+                    os.chmod(f"/proc/self/fd/{pfd}", stat.S_IMODE(st.st_mode) | 0o700)
+                else:
+                    _fchmodat2_nofollow("", pfd, stat.S_IMODE(st.st_mode) | 0o700)
         finally:
             os.close(pfd)
-    elif _FCHMODAT2 is not None:
-        st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
-        if stat.S_ISDIR(st.st_mode):
-            _fchmodat2_nofollow(name, dir_fd, stat.S_IMODE(st.st_mode) | 0o700)
     elif os.chmod in os.supports_follow_symlinks and os.chmod in os.supports_dir_fd:
         st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
         if stat.S_ISDIR(st.st_mode):
             os.chmod(name, stat.S_IMODE(st.st_mode) | 0o700, dir_fd=dir_fd, follow_symlinks=False)
 
 
-# fchmodat2 (Linux 6.6): the same number in the x86-64 table and in the generic table used by arm64
-_FCHMODAT2 = 452 if sys.platform.startswith("linux") and os.uname().machine in ("x86_64", "aarch64") else None
+def _fchmodat2_number(platform: str, machine: str) -> Optional[int]:
+    """The number of the fchmodat2 system call (Linux 6.6), or None where this module does not call it. 452 in the
+    tables of x86-64 and i386, of arm64 (the generic table) and of 32-bit arm (read at kernel.org on 2026-11-21); the
+    list of machines is closed because a table can differ (alpha: 562) and a wrong number is another system call."""
+    return 452 if platform.startswith("linux") and machine in ("x86_64", "aarch64") else None
+
+
+_FCHMODAT2 = _fchmodat2_number(sys.platform, os.uname().machine if hasattr(os, "uname") else "")
 
 
 def _fchmodat2_nofollow(name: str, dir_fd: Optional[int], mode: int) -> None:
-    """chmod of `name` (relative to `dir_fd`, or AT_FDCWD) that never follows a link: OSError otherwise."""
-    import ctypes
-    libc = ctypes.CDLL(None, use_errno=True)
-    libc.syscall.restype = ctypes.c_long
-    r = libc.syscall(ctypes.c_long(_FCHMODAT2), ctypes.c_int(-100 if dir_fd is None else dir_fd),
-                     ctypes.c_char_p(os.fsencode(name)), ctypes.c_uint(mode), ctypes.c_int(0x100))
+    """chmod that never follows a link, of `name` relative to `dir_fd` (None: AT_FDCWD), or of what the descriptor
+    `dir_fd` itself is when `name` is "" (AT_EMPTY_PATH; also an O_PATH descriptor): OSError otherwise, also where
+    ctypes or the C library's syscall() is missing (ENOSYS)."""
+    import errno
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        syscall = libc.syscall
+    except (ImportError, AttributeError) as err:
+        raise OSError(errno.ENOSYS, "fchmodat2: no ctypes or no syscall() in the C library", name) from err
+    syscall.restype = ctypes.c_long
+    r = syscall(ctypes.c_long(_FCHMODAT2), ctypes.c_int(-100 if dir_fd is None else dir_fd),
+                ctypes.c_char_p(os.fsencode(name)), ctypes.c_uint(mode), ctypes.c_int(0x100 | 0x1000))
     if r != 0:
         e = ctypes.get_errno()
         raise OSError(e, os.strerror(e), name)

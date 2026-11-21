@@ -65,8 +65,12 @@ jobs:
           python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_scqubits_adapter test_readme_example test_spherical_rotor test_hyperfine_molecule test_inputs_review test_duffing_vs_transmon test_multiport test_port_centrex_tlf test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_examples test_generative_inputs test_deprecated_aliases test_spec_bounds test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           for e in bwrap podman docker; do grep -qE "^test_s1_rete_bloccata \\(test_multiport\\.TestSandbox_$e(\\.test_s1_rete_bloccata)?\\) \\.\\.\\. ok" ../unittest.log || { echo "engine $e: the S1 test did not run"; exit 1; }; done
-          # what the tests left in TMPDIR (podman's own containers-user-<uid> folder, made when XDG_RUNTIME_DIR is unset, is not theirs)
-          left=$(find "$TMPDIR" -mindepth 1 -maxdepth 1 ! -name 'containers-user-*' -printf '%f\n')
+          # fchmodat2 (Linux 6.6+): the test of the removal without /proc must run here, not be skipped
+          grep -A1 -E '^test_removal_without_proc \(' ../unittest.log | grep -qE ' \.\.\. ok$' || { echo "fchmodat2: the test of the removal without /proc did not run"; exit 1; }
+          # what the tests left in TMPDIR. Not theirs: the folders podman makes there for itself when it finds no runtime
+          # directory (containers-user-<uid>: containers/storage 1.51.0 types/utils.go; podman-run-<uid>: podman 4.9.3
+          # pkg/util/utils_supported.go; storage-run-<uid>: containers/storage 1.53.0 pkg/homedir/homedir_unix.go)
+          left=$(find "$TMPDIR" -mindepth 1 -maxdepth 1 ! -name 'containers-user-*' ! -name 'podman-run-*' ! -name 'storage-run-*' -printf '%f\n')
           test -z "$left" || { echo "left in TMPDIR by the tests:"; echo "$left"; exit 1; }
       - name: Deprecated Italian aliases are the only source of DeprecationWarning (the English API is warning-free)
         run: |
@@ -110,6 +114,8 @@ jobs:
           python -B -m unittest -v test_guaranteed_intervals test_rotor_spectrum test_spherical_rotor test_hyperfine_molecule test_multiport test_mathieu test_fluxonium test_parameter_balls test_matrix_elements test_cos4phi_origin test_generative_inputs test_spec_bounds test_determinism 2>&1 | tee ../unittest.log
           test "${PIPESTATUS[0]}" -eq 0
           for e in bwrap docker; do grep -qE "^test_s1_rete_bloccata \\(test_multiport\\.TestSandbox_$e(\\.test_s1_rete_bloccata)?\\) \\.\\.\\. ok" ../unittest.log || { echo "engine $e: the S1 test did not run"; exit 1; }; done
+          # fchmodat2 (Linux 6.6+): the test of the removal without /proc must run here, not be skipped
+          grep -A1 -E '^test_removal_without_proc \(' ../unittest.log | grep -qE ' \.\.\. ok$' || { echo "fchmodat2: the test of the removal without /proc did not run"; exit 1; }
           cd .. && python -m rigorous_levels.reproduce && echo "determinism hash: $(python -m rigorous_levels.reproduce --hash) (linux-arm, python ${{ matrix.python }})"
 
   # ── macOS (ARM64 runner): everything that is not a sandbox, plus the sandbox-exec engine (S1–S7) ──

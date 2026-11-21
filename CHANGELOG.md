@@ -110,10 +110,26 @@ without `fchmodat2` either the folder stays and nothing raises (`test_removal_wi
 cap, the path check, `fchmodat2`): 14 run, 11 killed at the first round; the 3 alive (the error of `fchmodat2`
 ignored, rwx given to all, a file given rwx) killed by the second of those tests.
 
+Third review (2026-11-21), same paragraph of §6.7: `fchmodat2` was called by name after an `lstat`. A link put
+there in between was refused (`EOPNOTSUPP`), but a second name of a file of the user put there in between took the
+mode (measured with the swap injected, with `/proc` hidden and in a bubblewrap sandbox without `/proc`: 0640 became
+0700, and 0777 when the folder had been left 077). Now the folder is opened with `O_PATH | O_DIRECTORY | O_NOFOLLOW`
+and `fchmodat2` is called on that descriptor (`AT_EMPTY_PATH`), as with `/proc`: with the same swaps the file and
+the folder of the user keep their modes. Without ctypes the call raised `ImportError` out of `remove_tree`: now the
+folder stays and nothing raises. The system call number 452 was read in the tables of the kernel (kernel.org,
+2026-11-21): x86-64, i386, the generic table (arm64) and 32-bit arm have it; the code runs it only where the machine
+is `x86_64` or `aarch64` (`test_fchmodat2_only_where_its_number_was_read`). `test_removal_without_proc` and
+`test_owner_rwx_without_proc_exactly` rewritten for this; `TestWorkFolderClosed20261120` has 32 tests. Those two
+tests are skipped where `fchmodat2` does not work (a kernel before 6.6: before this they failed there, measured with
+the call made to fail with `ENOSYS`), and the `linux` and `linux-arm` jobs of `ci.yml` fail if
+`test_removal_without_proc` is skipped there.
+
 The tests left temporary homes in TMPDIR: the 20 modules of the CI on Python 3.11 in an empty TMPDIR left 12 folders
 (7 `home_prova_*` from `runner_direct` in `test_multiport.py`, 5 `home_example_*` from `test_examples.py`; measured on
 the tree before this change), and leave 0 now. The `linux` job of `ci.yml` runs the tests in an empty TMPDIR and fails
-if anything is left there but podman's own `containers-user-<uid>` folder.
+if anything is left there but the folders podman makes for itself when it finds no runtime directory
+(`containers-user-<uid>`, `podman-run-<uid>`, `storage-run-<uid>`: names read in the sources of podman 4.9.3 and of
+containers/storage 1.51.0 and 1.53.0; not measured, podman here has a runtime directory).
 
 ### The wasm engine no longer changes the mode of what a link in the work folder names (2026-11-20)
 
