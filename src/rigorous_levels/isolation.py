@@ -1283,12 +1283,22 @@ def remove_tree(path: str) -> None:
     through ".." only if ".." is the folder it came from (device and inode). Elsewhere (Windows):
     shutil.rmtree(ignore_errors=True), RecursionError caught. What a process still running writes there meanwhile
     (one that left the engine's process group: §6.3) can keep the folder from being removed: the removal is tried
-    again after each of REMOVE_PAUSES seconds, then the folder stays."""
+    again after each of REMOVE_PAUSES seconds, then the folder stays. The whole call ends within REMOVE_SECONDS plus
+    the time of one step (measured before this cap, with a process making folders one inside the other for 3 s and
+    9 s: the call followed it down and returned after 8.5 s and 19.5 s): the walk stops at that time and the folder
+    stays. A path whose last part is not a name (it ends with a separator, "." or "..") is not removed: the system
+    resolves a link there, O_NOFOLLOW or not (measured before this rule: with the top a link to a folder of the user
+    and the path given with a final "/", what that folder held was removed)."""
+    if os.path.basename(path) in ("", ".", ".."):
+        return
+    end = time.monotonic() + REMOVE_SECONDS
     for pause in (0.0,) + REMOVE_PAUSES:
+        if pause and time.monotonic() + pause >= end:
+            return
         time.sleep(pause)
         try:
             if _FD_REMOVAL:
-                _remove_tree_fd(path)
+                _remove_tree_fd(path, end)
             else:
                 shutil.rmtree(path, ignore_errors=True)
         except (OSError, RecursionError, ValueError):
@@ -1298,6 +1308,7 @@ def remove_tree(path: str) -> None:
 
 
 REMOVE_PAUSES = (0.05, 0.1, 0.2)   # seconds before each new try of remove_tree (a writer that outlived the run)
+REMOVE_SECONDS = 30.0              # seconds after which remove_tree stops walking (a writer it would follow down)
 
 
 _FD_REMOVAL = (os.name == "posix" and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
@@ -1306,8 +1317,12 @@ _FD_REMOVAL = (os.name == "posix" and hasattr(os, "O_DIRECTORY") and hasattr(os,
 _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
 
 
-def _owner_rwx_unopened(name: str, dir_fd: int) -> None:
-    """Gives the folder `name` (in `dir_fd`) the owner's rwx without following a link, when it cannot be opened."""
+def _owner_rwx_unopened(name: str, dir_fd: Optional[int]) -> None:
+    """Gives the folder `name` (in `dir_fd`; the top folder: None) the owner's rwx without following a link, when it
+    cannot be opened. Never a chmod by name alone: between an lstat and that chmod the name can become a link
+    (measured on the top folder, which was changed that way: the folder of the user the link named got the rwx).
+    Where neither way exists (Linux without /proc, when os.chmod is not in os.supports_follow_symlinks: Python 3.11
+    to 3.14 where this was measured) the folder is left as it is, and stays."""
     if hasattr(os, "O_PATH") and os.path.isdir("/proc/self/fd"):
         pfd = os.open(name, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
         try:
@@ -1327,13 +1342,7 @@ def _open_dir(name: str, dir_fd: Optional[int]) -> int:
     try:
         fd = os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
     except PermissionError:
-        if dir_fd is None:                       # the top folder: made by the host in its temporary directory
-            st = os.lstat(name)
-            if not stat.S_ISDIR(st.st_mode):
-                raise
-            os.chmod(name, stat.S_IMODE(st.st_mode) | 0o700)
-        else:
-            _owner_rwx_unopened(name, dir_fd)
+        _owner_rwx_unopened(name, dir_fd)
         fd = os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
     try:
         st = os.fstat(fd)
@@ -1345,7 +1354,8 @@ def _open_dir(name: str, dir_fd: Optional[int]) -> int:
     return fd
 
 
-def _remove_tree_fd(top: str) -> None:
+def _remove_tree_fd(top: str, end: float = float("inf")) -> None:
+    """One try. TimeoutError (an OSError) when time.monotonic() passes `end`: checked at each folder and each entry."""
     fd = _open_dir(top, None)
     st = os.fstat(fd)
     stack: List[Tuple[str, Tuple[int, int], List[str]]] = [("", (st.st_dev, st.st_ino), [])]
@@ -1353,9 +1363,13 @@ def _remove_tree_fd(top: str) -> None:
     try:
         while True:
             name, ident, todo = stack[-1]
+            if time.monotonic() > end:
+                raise TimeoutError("remove_tree: over REMOVE_SECONDS")
             if fresh:
                 with os.scandir(fd) as it:
                     for e in it:
+                        if time.monotonic() > end:
+                            raise TimeoutError("remove_tree: over REMOVE_SECONDS")
                         try:
                             if e.is_dir(follow_symlinks=False):
                                 todo.append(e.name)

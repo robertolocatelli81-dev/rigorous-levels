@@ -70,6 +70,34 @@ failures and 9 errors with the sub-cases), the 12 others pass. Mutants of the ch
 run, 46 killed at the first round; the 4 alive (no new try of the removal, the number of names of the copy's
 destination, the tail and the removal in `run_ports`) killed after the tests named above were added or changed.
 
+Second review (2026-11-21) of `isolation.remove_tree`, measured on the code of the first review (Linux, btrfs; the
+cases on Python 3.11 to 3.14, the timed and the concurrent runs on 3.11; §6.7 revised first):
+- a process that outlived the run and kept making folders one inside the other was followed down for as long as it
+  ran: the removal returned 8.5 s after its start with such a process of 3 s, 19.5 s with one of 9 s (`run_port`
+  with the engine replaced: 8.2 s with the one of 3 s). Now the whole removal stops 30 s after it began
+  (`REMOVE_SECONDS`, checked at each folder and each entry) and the folder stays: 30.0 s with such a process of 20 s.
+- the top folder left 000 got the owner's rwx with a chmod by name after an `lstat`: with the name swapped for a link
+  between the two (it takes a process able to write in the temporary directory; measured with the swap injected), the
+  folder of the user the link named got the rwx. Now through an `O_PATH` descriptor opened with `O_NOFOLLOW`, as for
+  the folders inside.
+- a path given with a final `/` or `/.`, the top being a link to a folder of the user: what that folder held was
+  removed (`shutil.rmtree` does the same; `run_port` and `run_ports` pass `mkdtemp` paths, which end with a name).
+  Now a path whose last part is not a name is not removed.
+Measured on the code of the first review and unchanged: nothing outside the tree was changed in 22 cases (links to a
+folder and to a file of the user, hard links, a FIFO, a socket, modes 000 to 0600 at three levels, 3 000 folders one
+inside the other, 20 000 files and 2 000 folders, a folder swapped for a link at its open, at its `O_PATH` open and
+before its chmod, a folder moved out while the walk was below it) nor in 400 runs with a process swapping folders
+for links, moving them out or taking their permissions away meanwhile; the status-change time gave no `ERROR` in 6 000 clean runs with
+the engine replaced (bwrap, wasm) and in 480 `run_port` and 80 `run_ports` with the real `bwrap`, and saw all of
+12 000 changes made and undone right after the record.
+`TestWorkFolderClosed20261120` now has 29 tests: 5 added (the three changes above; a folder without permissions
+swapped for a link at the `O_PATH` open and the modes given; `..` on another device) and one adapted to the new
+argument. On the code of the first review the first three of the five fail; the other two cover lines of that code
+whose mutants were alive (the `O_PATH` open without `O_NOFOLLOW`, rwx given to everyone, `..` compared by inode
+alone). Mutants of the lines of the removal and of the status time: 24 run, 23 killed; the one alive (the clock wait
+on the folder's time alone) is equivalent where `run()` calls it: no entry had a status time later than the folder's
+in 3 000 runs and in the 259 records made by the tests.
+
 ### The wasm engine no longer changes the mode of what a link in the work folder names (2026-11-20)
 
 `isolation._run_wasm` made the files of the work folder read-only for the run (0444) and writable after it (0644)

@@ -170,7 +170,8 @@ dirty-output checks pass; S3-memory, S6, S7 need numpy and are skipped with that
 physics of the other solver.
 
 6.7 The work folder after the run (Unreleased; rule written on 2026-11-20 before the code, for every engine; revised
-on 2026-11-21 after the review of that code, before the new code). The work folder is read-only for the port, so after
+on 2026-11-21 after the review of that code, before the new code, and again that day after the second review:
+the removal). The work folder is read-only for the port, so after
 the run it must hold exactly what the host put there. Before the run the host puts in it `request.json`
 (`requests.json` for a batch, §8), `port_runner.py`, `output.json` (empty: the mount point of the engines that bind
 the output file) and `stderr.txt` (empty: the file the host writes the run's standard error to), sets the folder's
@@ -180,7 +181,8 @@ group; for each entry except `stderr.txt` also the size, the modification time a
 through a descriptor opened with `O_NOFOLLOW | O_NONBLOCK` that must be the same regular file (device and inode); on
 POSIX also the status-change time (`st_ctime_ns`) of the folder and of each entry except `stderr.txt`. A process
 cannot set that time: a change made and undone, or made to something not recorded (an extended attribute, the
-access time, a second name made and removed), still moves it. So that a change made at once cannot fall in the same
+access time set with `utime`, a second name made and removed), still moves it; reading a file moves its access time
+and not this one, so a port that only reads changes nothing here. So that a change made at once cannot fall in the same
 tick of the file system clock, the record ends only when that clock has passed the recorded times (the host sets the
 times of `stderr.txt` until its status-change time is later, for at most 0.1 s; with a coarser clock a change in that
 tick is not seen through this time). After the run, before the host reads the port's output or `stderr.txt`, the
@@ -200,20 +202,26 @@ bytes) are named and the others counted. A folder that cannot be read again give
 content of a recorded file is read only if its size is still the recorded one, and never beyond it. This check comes
 before the host caps, the timeout and the output (`run()` returns its reason as the `limit` of the run).
 
-The host's own reads and writes in the folder after the check never go through a link: the copy of the `wasm` run's
+The host's own reads and writes in the folder after the run never go through a link: the copy of the `wasm` run's
 standard error into `stderr.txt` and the last 600 bytes of `stderr.txt` read for the reason of an output without
 levels use a regular file with one name only (`lstat`, then `O_NOFOLLOW`, then the same device and inode; where
 `O_NOFOLLOW` is missing the `lstat` decides), the copy without `O_TRUNC`. The folder is then removed without
 following links and without recursion, also when the run left it or a folder inside it without the owner's read,
 write or search permission (POSIX with descriptors: each folder opened relative to its parent with
-`O_DIRECTORY | O_NOFOLLOW`, given the owner's rwx through that descriptor, the walk going back up through `..` only
-if it is the folder it came from; Windows: `shutil.rmtree`). The removal is tried again after 0.05, 0.1 and 0.2 s if
-the folder is still there (a process that outlived the run and still writes in it); after that it stays.
+`O_DIRECTORY | O_NOFOLLOW`, given the owner's rwx through a descriptor, never by name, the top folder included,
+the walk going back up through `..` only if it is the folder it came from; Windows: `shutil.rmtree`). A path whose
+last part is not a name (a final separator, `.` or `..`) is not removed: the system resolves a link there. The
+removal is tried again after 0.05, 0.1 and 0.2 s if the folder is still there (a process that outlived the run and
+still writes in it), and the whole removal stops 30 s after it began, checked at each folder and each entry; after
+that the folder stays.
 
 What it does not see: on Windows the status-change time does not exist (`st_ctime` is the creation time), so a
 change undone before the run ends (content, size, mode, times set back with `utime`) is not seen there; the entries
 inside a folder the host did not put there are not listed one by one (the folder is named); a process that outlived
-the run and keeps writing longer than the removal tries can keep the folder in the temporary directory. Measured on
+the run and keeps writing longer than the removal tries can keep the folder in the temporary directory, and one
+that keeps making folders one inside the other is followed down until those 30 s end (measured without that cap: such
+a process of 3 s and of 9 s kept the removal busy for 8.5 s and 19.5 s, and `run_port`, with the engine replaced,
+returned 8.2 s after its start with the one of 3 s). Measured on
 Linux (btrfs) with the engine replaced (`tests/test_multiport.py` `TestWorkFolderClosed20261120`) and with `bwrap`
 for the runs that change nothing; on macOS, Windows and with the container engines it runs in CI, not measured on the
 author's machine.

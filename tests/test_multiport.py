@@ -2316,12 +2316,12 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
         open(os.path.join(top, "f"), "w").close()
         tries, real = [], (isolation._remove_tree_fd if isolation._FD_REMOVAL else None)
 
-        def first_fails(path):
+        def first_fails(path, end):
             tries.append(path)
             if len(tries) == 1:
                 raise OSError("busy")
             if real:
-                real(path)
+                real(path, end)
             else:
                 shutil.rmtree(path)
         name = "_remove_tree_fd" if isolation._FD_REMOVAL else None
@@ -2382,6 +2382,191 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
         self.assertTrue(os.path.isdir(os.path.join(top, "a")))   # stopped: "a" and the top stay
         self.assertTrue(os.path.isdir(self.d))
         isolation.remove_tree(top)                               # control
+        self.assertFalse(os.path.lexists(top))
+
+    def test_remove_tree_path_that_does_not_end_with_a_name(self):
+        """a path ending with a separator, "." or "..": the system resolves a link there, so nothing is removed
+        (measured before: with the top a link to a folder of the user and a final "/", that folder was emptied)"""
+        from rigorous_levels import isolation
+        if os.name != "posix":
+            self.skipTest("POSIX links")
+        vdir = os.path.join(self.d, "vdir")
+        os.makedirs(os.path.join(vdir, "sub"))
+        with open(os.path.join(vdir, "keep"), "w") as f:
+            f.write("k")
+        link = os.path.join(self.d, "top_link")
+        os.symlink(vdir, link)
+        real = tempfile.mkdtemp(dir=self.d)
+        open(os.path.join(real, "f"), "w").close()
+        for tail in (os.sep, os.sep + ".", os.sep + os.sep, os.sep + "sub" + os.sep + ".."):
+            with self.subTest(tail=tail):
+                isolation.remove_tree(link + tail)
+                self.assertEqual(sorted(os.listdir(vdir)), ["keep", "sub"])
+                isolation.remove_tree(real + tail.replace("sub", "."))
+                self.assertEqual(os.listdir(real), ["f"])
+        isolation.remove_tree(os.path.join(self.d, "nul\0name"))  # a path the system refuses: nothing raised
+        isolation.remove_tree(link)                               # the link itself: never followed, it stays
+        self.assertTrue(os.path.islink(link))
+        self.assertEqual(sorted(os.listdir(vdir)), ["keep", "sub"])
+        isolation.remove_tree(real)                               # control: the same folder by its name
+        self.assertFalse(os.path.lexists(real))
+
+    def test_remove_tree_top_folder_is_never_changed_by_name(self):
+        """the top folder left 000: its mode is changed through a descriptor, never by name (between an lstat and a
+        chmod by name the name can become a link: measured before, the folder of the user it named got the rwx)"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not isolation._FD_REMOVAL:
+            self.skipTest("descriptor removal not used here")
+        vdir = os.path.join(self.d, "vdir")
+        os.mkdir(vdir)
+        os.chmod(vdir, 0o500)
+        top = tempfile.mkdtemp(dir=self.d)
+        os.chmod(top, 0o000)
+        real_chmod, calls = os.chmod, []
+
+        def chmod(path, mode, *a, **k):
+            calls.append((path, k.get("follow_symlinks", True)))
+            if len(calls) == 1:                                   # the name becomes a link right before the change
+                os.rename(top, top + ".moved")
+                os.symlink(vdir, top)
+            return real_chmod(path, mode, *a, **k)
+        with mock.patch.object(isolation.os, "chmod", chmod), mock.patch.object(isolation, "REMOVE_PAUSES", ()):
+            isolation.remove_tree(top)
+        self.assertEqual(len(calls), 1, calls)
+        by_fd = str(calls[0][0]).startswith("/proc/self/fd/") or calls[0][1] is False
+        self.assertTrue(calls[0][0] != top and by_fd, calls)
+        self.assertEqual(stat.S_IMODE(os.lstat(vdir).st_mode), 0o500)
+        self.assertTrue(os.path.islink(top))                      # the link stays, the folder it names untouched
+        os.chmod(vdir, 0o700)
+        top2 = tempfile.mkdtemp(dir=self.d)                       # control: without the swap the 000 top is removed
+        os.chmod(top2, 0o000)
+        isolation.remove_tree(top2)
+        self.assertFalse(os.path.lexists(top2))
+
+    def test_remove_tree_ends_within_remove_seconds(self):
+        """a process that keeps making folders one inside the other (measured before the cap: the removal followed
+        it down for as long as it ran): the walk stops at REMOVE_SECONDS, never raises, the folder stays"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not isolation._FD_REMOVAL:
+            self.skipTest("descriptor removal not used here")
+        top = tempfile.mkdtemp(dir=self.d)
+        os.makedirs(os.path.join(top, "a", "b"))
+        with mock.patch.object(isolation, "REMOVE_SECONDS", -1.0):   # the time is already over: nothing is walked
+            isolation.remove_tree(top)
+        self.assertTrue(os.path.isdir(os.path.join(top, "a", "b")))
+        self.assertGreaterEqual(isolation.REMOVE_SECONDS, 5 * sum(isolation.REMOVE_PAUSES))
+        empty, sleeps = tempfile.mkdtemp(dir=self.d), []
+        with mock.patch.object(isolation, "REMOVE_SECONDS", -1.0), \
+                mock.patch.object(isolation.time, "sleep", sleeps.append):
+            isolation.remove_tree(empty)                          # checked at each folder, also one without entries
+        self.assertTrue(os.path.isdir(empty))
+        self.assertEqual(sleeps, [0.0])                           # and no pause that would end after the time
+        flat, ticks = tempfile.mkdtemp(dir=self.d), [0.0]
+        for i in range(10):
+            open(os.path.join(flat, f"f{i}"), "w").close()
+
+        def clock():                                              # one second per reading
+            ticks[0] += 1.0
+            return ticks[0]
+        with mock.patch.object(isolation.time, "monotonic", clock), \
+                mock.patch.object(isolation, "REMOVE_SECONDS", 3.5), mock.patch.object(isolation.time, "sleep", lambda s: None):
+            isolation.remove_tree(flat)                           # checked at each entry of one folder too
+        self.assertEqual(len(os.listdir(flat)), 8)                # the first try stopped at its third entry
+        dig = ("import os, sys, time\nend = time.monotonic() + 1.2\nwhile time.monotonic() < end:\n"
+               "    try:\n        os.chdir(sys.argv[1])\n        while time.monotonic() < end:\n"
+               "            os.mkdir('d')\n            os.chdir('d')\n    except OSError:\n        pass\n")
+        p = subprocess.Popen([sys.executable, "-c", dig, top])   # a process of its own, digging for 1.2 s
+        try:
+            time.sleep(0.2)
+            t0 = time.monotonic()
+            with mock.patch.object(isolation, "REMOVE_SECONDS", 0.2):
+                isolation.remove_tree(top)
+            dt = time.monotonic() - t0
+        finally:
+            p.wait(30)
+            with mock.patch.object(isolation, "REMOVE_SECONDS", 120.0):
+                isolation.remove_tree(top)                        # the writer gone: removed (also for tearDown)
+        self.assertLess(dt, 0.9)                                  # without the cap: as long as the writer digs
+        self.assertFalse(os.path.lexists(top))
+
+    def test_remove_tree_folder_without_permissions_swapped_for_a_link(self):
+        """a folder left 000 inside: the owner's rwx is given through an O_PATH descriptor opened with O_NOFOLLOW (a
+        link swapped in at that moment is not followed), and only the owner's bits are added"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not (isolation._FD_REMOVAL and hasattr(os, "O_PATH") and os.path.isdir("/proc/self/fd")):
+            self.skipTest("no O_PATH descriptors here")
+        vdir = os.path.join(self.d, "vdir")
+        os.mkdir(vdir)
+        os.chmod(vdir, 0o500)
+        top = tempfile.mkdtemp(dir=self.d)
+        os.mkdir(os.path.join(top, "p"))
+        os.chmod(os.path.join(top, "p"), 0o000)
+        real_open, done = os.open, []
+
+        def swap_open(path, flags, *a, **k):
+            if path == "p" and flags & os.O_PATH and not done:
+                done.append(1)
+                os.rename(os.path.join(top, "p"), os.path.join(top, "p.moved"))   # same parent: allowed for 000
+                os.symlink(vdir, os.path.join(top, "p"))
+            return real_open(path, flags, *a, **k)
+        with mock.patch.object(isolation.os, "open", swap_open):
+            isolation.remove_tree(top)
+        self.assertEqual(done, [1])
+        self.assertEqual(stat.S_IMODE(os.lstat(vdir).st_mode), 0o500)
+        self.assertFalse(os.path.lexists(top))                    # the link removed as an entry at the next try
+        os.chmod(vdir, 0o700)
+        top = tempfile.mkdtemp(dir=self.d)                        # the modes given: the owner's rwx and nothing else
+        os.makedirs(os.path.join(top, "q", "r"))
+        os.mkdir(os.path.join(top, "z"))
+        os.chmod(os.path.join(top, "q", "r"), 0o000)
+        os.chmod(os.path.join(top, "q"), 0o500)
+        os.chmod(os.path.join(top, "z"), 0o000)
+        os.chmod(top, 0o000)
+        real_chmod, real_fchmod, modes = os.chmod, os.fchmod, []
+
+        def chmod(path, mode, *a, **k):
+            modes.append(mode)
+            return real_chmod(path, mode, *a, **k)
+
+        def fchmod(fd, mode):
+            modes.append(mode)
+            return real_fchmod(fd, mode)
+        with mock.patch.object(isolation.os, "chmod", chmod), mock.patch.object(isolation.os, "fchmod", fchmod):
+            isolation.remove_tree(top)
+        self.assertFalse(os.path.lexists(top))
+        self.assertEqual(sorted(modes), [0o700, 0o700, 0o700, 0o700])
+
+    def test_remove_tree_parent_on_another_device(self):
+        """going back up: ".." must be the folder it came from by device AND inode (two file systems number their
+        inodes on their own)"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not isolation._FD_REMOVAL:
+            self.skipTest("descriptor removal not used here")
+        top = tempfile.mkdtemp(dir=self.d)
+        os.makedirs(os.path.join(top, "a", "b"))
+        real_open, real_fstat, parents = os.open, os.fstat, set()
+
+        def open_(path, flags, *a, **k):
+            fd = real_open(path, flags, *a, **k)
+            if path == "..":
+                parents.add(fd)
+            return fd
+
+        def fstat(fd):
+            st = real_fstat(fd)
+            if fd in parents:                                     # the same inode number on another device
+                parents.discard(fd)
+                return os.stat_result((st.st_mode, st.st_ino, st.st_dev + 1) + tuple(st)[3:])
+            return st
+        with mock.patch.object(isolation.os, "open", open_), mock.patch.object(isolation.os, "fstat", fstat), \
+                mock.patch.object(isolation, "REMOVE_PAUSES", ()):
+            isolation.remove_tree(top)
+        self.assertTrue(os.path.isdir(os.path.join(top, "a", "b")))   # stopped at the first step up
+        isolation.remove_tree(top)
         self.assertFalse(os.path.lexists(top))
 
     def test_folder_unreadable_after_the_run(self):
