@@ -169,34 +169,54 @@ dirty-output checks pass; S3-memory, S6, S7 need numpy and are skipped with that
 6.6 What no engine claims: protection against kernel exploits, side channels, or a compromised engine binary; the
 physics of the other solver.
 
-6.7 The work folder after the run (Unreleased; rule written on 2026-11-20 before the code, for every engine). The work
-folder is read-only for the port, so after the run it must hold exactly what the host put there. Before the run the host
-puts in it `request.json` (`requests.json` for a batch, §8), `port_runner.py`, `output.json` (empty: the mount point of
-the engines that bind the output file) and `stderr.txt` (empty: the file the host writes the run's standard error to),
-sets the folder's modification time to a fixed value (86 400 s after the epoch), and records, with `lstat` (a link is
-never followed): for the folder and for each entry the kind and permission bits (`st_mode`), device, inode, number of
-names, owner and group; for each entry except `stderr.txt` also the size, the modification time and the SHA-256 of
-the content, read through a descriptor opened with `O_NOFOLLOW | O_NONBLOCK` that must be the same regular file
-(device and inode). After the run (for `wasm` after the modes it changed for the run are set back to the recorded ones)
-and before the host reads anything the port produced, the folder is read again in the same way, names as bytes. Any
-difference makes every output of the run `ERROR`, the port's output discarded, with the reason
-`work folder changed during the run (it is read-only for the port): ` followed by the differences: an entry the host
-did not put there, with its kind (file, folder, symbolic link, hard link = a regular file with more than one name,
-FIFO, socket, character or block device), hidden names and names that are not UTF-8 included; an entry missing; an
-entry whose kind, mode, inode, number of names, owner, group, size, time or content changed; the folder's mode,
-inode, number of names, owner, group or modification time changed. Names are written as Python literals: a string
-literal for a UTF-8 name, a bytes literal (`b'...'`, `\x` escapes) for any other, at most 80 characters; at most 20
-differences (in the order of the names' bytes) are named and the others counted.
-A folder that cannot be read again gives `ERROR` with that reason. This check comes before the host caps, the timeout
-and the output (`run()` returns its reason as the `limit` of the run). The folder is then removed with
-`shutil.rmtree`, which does not follow links. The one write of the host into the folder after the run (`wasm`: the
-copy of the run's standard error) opens `stderr.txt` with `O_NOFOLLOW` and without `O_TRUNC` and writes only into a
-regular file with one name. What it does not see: a change undone before the run ends (content, size, mode, and the
-times set back with `utime`); an entry created and removed during the run changes the folder's modification time and
-is seen, unless the port also sets that time back to the fixed value; the entries inside a folder the host did not
-put there are not listed one by one (the folder is named). Measured on Linux with the engine
-replaced (`tests/test_multiport.py` `TestWorkFolderClosed20261120`) and with `bwrap` for the runs that change nothing;
-on macOS, Windows and with the container engines it runs in CI, not measured on the author's machine.
+6.7 The work folder after the run (Unreleased; rule written on 2026-11-20 before the code, for every engine; revised
+on 2026-11-21 after the review of that code, before the new code). The work folder is read-only for the port, so after
+the run it must hold exactly what the host put there. Before the run the host puts in it `request.json`
+(`requests.json` for a batch, §8), `port_runner.py`, `output.json` (empty: the mount point of the engines that bind
+the output file) and `stderr.txt` (empty: the file the host writes the run's standard error to), sets the folder's
+modification time to a fixed value (86 400 s after the epoch), and records, with `lstat` (a link is never followed):
+for the folder and for each entry the kind and permission bits (`st_mode`), device, inode, number of names, owner and
+group; for each entry except `stderr.txt` also the size, the modification time and the SHA-256 of the content, read
+through a descriptor opened with `O_NOFOLLOW | O_NONBLOCK` that must be the same regular file (device and inode); on
+POSIX also the status-change time (`st_ctime_ns`) of the folder and of each entry except `stderr.txt`. A process
+cannot set that time: a change made and undone, or made to something not recorded (an extended attribute, the
+access time, a second name made and removed), still moves it. So that a change made at once cannot fall in the same
+tick of the file system clock, the record ends only when that clock has passed the recorded times (the host sets the
+times of `stderr.txt` until its status-change time is later, for at most 0.1 s; with a coarser clock a change in that
+tick is not seen through this time). After the run, before the host reads the port's output or `stderr.txt`, the
+folder is read again in the same way, names as bytes. For `wasm`, whose engine itself makes the folder 0555 and the
+files 0444 for the run and sets them back after it, the status-change times are recorded after the modes are set
+for the run and read again before they are set back; the run's standard error is copied into `stderr.txt` before
+the check (see below). Any difference makes every output of the run `ERROR`, the port's output discarded, with the
+reason `work folder changed during the run (it is read-only for the port): ` followed by the differences: an entry
+the host did not put there, with its kind (file, folder, symbolic link, hard link = a regular file with more than
+one name, FIFO, socket, character or block device), hidden names and names that are not UTF-8 included; an entry
+missing; an entry whose kind, mode, inode, number of names, owner, group, size, time or content changed; the
+folder's mode, inode, number of names, owner, group or modification time changed; and, when nothing else differs
+for that entry or the folder, `status-change time changed (changed during the run and set back, or an attribute not
+recorded changed)`. Names are written as Python literals: a string literal for a UTF-8 name, a bytes literal
+(`b'...'`, `\x` escapes) for any other, at most 80 characters; at most 20 differences (in the order of the names'
+bytes) are named and the others counted. A folder that cannot be read again gives `ERROR` with that reason. The
+content of a recorded file is read only if its size is still the recorded one, and never beyond it. This check comes
+before the host caps, the timeout and the output (`run()` returns its reason as the `limit` of the run).
+
+The host's own reads and writes in the folder after the check never go through a link: the copy of the `wasm` run's
+standard error into `stderr.txt` and the last 600 bytes of `stderr.txt` read for the reason of an output without
+levels use a regular file with one name only (`lstat`, then `O_NOFOLLOW`, then the same device and inode; where
+`O_NOFOLLOW` is missing the `lstat` decides), the copy without `O_TRUNC`. The folder is then removed without
+following links and without recursion, also when the run left it or a folder inside it without the owner's read,
+write or search permission (POSIX with descriptors: each folder opened relative to its parent with
+`O_DIRECTORY | O_NOFOLLOW`, given the owner's rwx through that descriptor, the walk going back up through `..` only
+if it is the folder it came from; Windows: `shutil.rmtree`). The removal is tried again after 0.05, 0.1 and 0.2 s if
+the folder is still there (a process that outlived the run and still writes in it); after that it stays.
+
+What it does not see: on Windows the status-change time does not exist (`st_ctime` is the creation time), so a
+change undone before the run ends (content, size, mode, times set back with `utime`) is not seen there; the entries
+inside a folder the host did not put there are not listed one by one (the folder is named); a process that outlived
+the run and keeps writing longer than the removal tries can keep the folder in the temporary directory. Measured on
+Linux (btrfs) with the engine replaced (`tests/test_multiport.py` `TestWorkFolderClosed20261120`) and with `bwrap`
+for the runs that change nothing; on macOS, Windows and with the container engines it runs in CI, not measured on the
+author's machine.
 
 ## 8. Batches (`run_ports`)
 

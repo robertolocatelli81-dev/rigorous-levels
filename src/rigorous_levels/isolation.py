@@ -58,6 +58,10 @@ WATCH_INTERVAL = 0.02  # seconds between two samples of the host watchdog (sandb
 WORK_FOLDER_TIME_NS = 86400 * 10 ** 9   # modification time given to the work folder before the run (PORT_CONTRACT §6.7)
 WORK_HOST_WRITES = (b"stderr.txt",)     # entries the host itself writes during or after the run: size, time, content
 WORK_REASON_MAX = 20                    # differences named in the reason of a changed work folder (the others counted)
+WORK_TICK_WAIT = 0.1                    # seconds work_snapshot waits at most for the file system clock to pass its record
+_STATUS_TIME = os.name == "posix"       # st_ctime: the last status change on POSIX (on Windows the creation: not recorded)
+WORK_HEAD = "work folder changed during the run (it is read-only for the port): "
+_STATUS_WORDS = "status-change time changed (changed during the run and set back, or an attribute not recorded changed)"
 _PROBES: Dict[Tuple[str, str], Dict[str, object]] = {}
 
 
@@ -968,7 +972,10 @@ def _copy_run_stderr(src: str, dst: str) -> None:
     the reason of an output without levels); removed, or replaced by a folder or a FIFO, FileNotFoundError,
     IsADirectoryError or shutil.SpecialFileError left _run_wasm. `dst` (in the work folder) is opened with O_NOFOLLOW
     and without O_TRUNC, written only if it is a regular file with one name, and truncated through the descriptor:
-    anything else there is left as it is, and named by the check of the work folder (docs/PORT_CONTRACT.md §6.7)."""
+    anything else there is left as it is, and named by the check of the work folder (docs/PORT_CONTRACT.md §6.7).
+    Where O_NOFOLLOW is missing (Windows) the lstat decides, as for `src`: a link is not opened, and the file opened
+    must be the one the lstat saw (measured with O_NOFOLLOW set to 0: before, the file a symbolic link named was
+    overwritten)."""
     why = ""
     fd = -1
     try:
@@ -985,13 +992,22 @@ def _copy_run_stderr(src: str, dst: str) -> None:
         why = type(e).__name__
     try:
         try:
+            ld = os.lstat(dst)
+        except FileNotFoundError:
+            ld = None                            # removed during the run: made again here, named by the check (§6.7)
+        except OSError:
+            return
+        if ld is not None and not (stat.S_ISREG(ld.st_mode) and ld.st_nlink == 1):
+            return                               # a link, a FIFO, a folder: left as it is, with or without O_NOFOLLOW
+        try:
             fo = os.open(dst, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
                          | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0), 0o666)
         except OSError:
             return                               # a link, a FIFO without reader, a folder: left as it is
         with os.fdopen(fo, "wb") as out:
             fs = os.fstat(out.fileno())
-            if not (stat.S_ISREG(fs.st_mode) and fs.st_nlink == 1):
+            if not (stat.S_ISREG(fs.st_mode) and fs.st_nlink == 1
+                    and (ld is None or (fs.st_dev, fs.st_ino) == (ld.st_dev, ld.st_ino))):
                 return
             out.truncate(0)
             if why:
@@ -1031,7 +1047,9 @@ def _shown(name: bytes) -> str:
 
 def _content_sha256(path: bytes, st: os.stat_result) -> str:
     """SHA-256 of a regular file read through a descriptor opened with O_NOFOLLOW | O_NONBLOCK that must be the file
-    `st` describes (device and inode); otherwise a word saying why it was not read."""
+    `st` describes (device and inode); otherwise a word saying why it was not read. Exactly `st.st_size` bytes are
+    read: a file that is shorter or longer by then is not hashed (the time of the check is bounded by the sizes the
+    host recorded, never by what a port made of a file)."""
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
                      | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
@@ -1042,11 +1060,16 @@ def _content_sha256(path: bytes, st: os.stat_result) -> str:
         if not (stat.S_ISREG(fs.st_mode) and (fs.st_dev, fs.st_ino) == (st.st_dev, st.st_ino)):
             return "not the same regular file"
         h = hashlib.sha256()
-        while True:
-            b = os.read(fd, 1 << 16)
+        left = st.st_size
+        while left > 0:
+            b = os.read(fd, min(1 << 16, left))
             if not b:
-                return h.hexdigest()
+                break
             h.update(b)
+            left -= len(b)
+        if left or os.read(fd, 1):
+            return "not read to the end (the size changed while it was read)"
+        return h.hexdigest()
     finally:
         os.close(fd)
 
@@ -1056,33 +1079,101 @@ def _meta(st: os.stat_result) -> Dict[str, int]:
             "names": st.st_nlink, "owner": st.st_uid, "group": st.st_gid}
 
 
-def _entry_record(folder: bytes, name: bytes) -> Dict[str, object]:
+def _entry_record(folder: bytes, name: bytes, size: Optional[int] = None) -> Dict[str, object]:
+    """The record of one entry. With `size` (the size recorded before the run) the content is read only if the size
+    is still that one: a file made larger is already a difference, and is not read. The status-change time comes
+    last: it is named only when nothing else differs (_fields)."""
     path = os.path.join(folder, name)
     st = os.lstat(path)
     rec: Dict[str, object] = _meta(st)
     if name not in WORK_HOST_WRITES:
         rec["size"], rec["time"] = st.st_size, st.st_mtime_ns
-        rec["content"] = _content_sha256(path, st) if stat.S_ISREG(st.st_mode) else ""
+        if not stat.S_ISREG(st.st_mode):
+            rec["content"] = ""
+        elif size is not None and st.st_size != size:
+            rec["content"] = "not read (the size changed)"
+        else:
+            rec["content"] = _content_sha256(path, st)
+        if _STATUS_TIME:
+            rec["status"] = st.st_ctime_ns
     return rec
 
 
 def work_snapshot(work: str) -> Dict[str, object]:
     """Before the run: the folder's modification time set to WORK_FOLDER_TIME_NS, then the record of the folder and of
-    every entry the host put there (lstat: links not followed; names as bytes)."""
+    every entry the host put there (lstat: links not followed; names as bytes). On POSIX the record holds the
+    status-change time (st_ctime_ns) of the folder and of each entry the host does not write: a process cannot set
+    it, so a change made and then undone, or made to something not recorded (an extended attribute), still moves
+    it. So that a change made right after the record cannot fall in the same tick of the file system clock, the
+    function returns only when that clock has passed every time recorded: it sets the times of an entry the host
+    writes (stderr.txt, not compared) until its status-change time is later, for at most WORK_TICK_WAIT seconds
+    (no such entry, or a coarser clock: no wait, and a change inside that tick is not seen through this time)."""
     folder = os.fsencode(work)
     os.utime(folder, ns=(WORK_FOLDER_TIME_NS, WORK_FOLDER_TIME_NS))
     entries = {n: _entry_record(folder, n) for n in sorted(os.listdir(folder))}
     st = os.lstat(folder)
-    return {"folder": dict(_meta(st), time=st.st_mtime_ns), "entries": entries}
+    rec = dict(_meta(st), time=st.st_mtime_ns)
+    if _STATUS_TIME:
+        rec["status"] = st.st_ctime_ns
+        _wait_clock_past(folder, max([st.st_ctime_ns] + [e["status"] for e in entries.values() if "status" in e]))
+    return {"folder": rec, "entries": entries}
 
 
-def _fields(before: Dict[str, object], after: Dict[str, object]) -> str:
+def _wait_clock_past(folder: bytes, last: int) -> None:
+    """Returns when the file system clock has passed `last` (a status-change time just recorded): sets the times of
+    an entry the host writes (stderr.txt, its times not compared) until its status-change time is later, for at most
+    WORK_TICK_WAIT seconds; without such an entry, or with a coarser clock, it returns without that guarantee."""
+    for n in WORK_HOST_WRITES:
+        probe = os.path.join(folder, n)
+        try:
+            st = os.lstat(probe)
+        except OSError:
+            continue
+        if not (stat.S_ISREG(st.st_mode) and st.st_nlink == 1):
+            continue
+        end = time.monotonic() + WORK_TICK_WAIT
+        while True:
+            os.utime(probe)
+            if os.lstat(probe).st_ctime_ns > last or time.monotonic() >= end:
+                return
+            time.sleep(0.0005)
+
+
+def _status_times(folder: bytes) -> Dict[bytes, int]:
+    """st_ctime_ns of the folder (key b"") and of each entry except the ones the host writes (lstat)."""
+    out = {b"": os.lstat(folder).st_ctime_ns}
+    for n in os.listdir(folder):
+        if n not in WORK_HOST_WRITES:
+            out[n] = os.lstat(os.path.join(folder, n)).st_ctime_ns
+    return out
+
+
+def _status_moved(folder: bytes, mid: Dict[bytes, int]) -> str:
+    """wasm: the reason (§6.7) if a status-change time recorded after the modes were set for the run moved during
+    the run (read before the modes are set back), else ""."""
+    try:
+        now = _status_times(folder)
+    except OSError as err:
+        return WORK_HEAD + f"the folder could not be read again ({type(err).__name__})"
+    moved = sorted(n for n in set(mid) | set(now) if mid.get(n) != now.get(n))
+    parts = [("the folder" if n == b"" else _shown(n)) + ": " + _STATUS_WORDS for n in moved[:WORK_REASON_MAX]]
+    if len(moved) > WORK_REASON_MAX:
+        parts.append(f"and {len(moved) - WORK_REASON_MAX} more")
+    return WORK_HEAD + "; ".join(parts) if parts else ""
+
+
+def _fields(before: Dict[str, object], after: Dict[str, object], status: bool = True) -> str:
+    """The fields that differ, named. The status-change time is named only when it is the one difference (with
+    another one it adds nothing), and not at all with status=False."""
     out = []
+    moved = False
     for k, v in before.items():
         w = after.get(k)
         if w == v:
             continue
-        if k == "kind":
+        if k == "status":
+            moved = status
+        elif k == "kind":
             out.append("kind changed")
         elif k == "mode":
             out.append(f"mode {oct(v)} -> {oct(w)}")
@@ -1092,13 +1183,16 @@ def _fields(before: Dict[str, object], after: Dict[str, object]) -> str:
             out.append("modification time changed")
         else:
             out.append(f"{k} changed")
+    if moved and not out:
+        out.append(_STATUS_WORDS)
     return ", ".join(out)
 
 
-def work_changes(work: str, before: Dict[str, object]) -> str:
+def work_changes(work: str, before: Dict[str, object], status: bool = True) -> str:
     """After the run: "" if the work folder holds exactly what `before` recorded, else the reason of an ERROR naming
-    the differences (at most WORK_REASON_MAX, sorted by name, the others counted). Never raises."""
-    head = "work folder changed during the run (it is read-only for the port): "
+    the differences (at most WORK_REASON_MAX, sorted by name, the others counted). Never raises. status=False: the
+    status-change times are not compared (wasm: the host itself changes the modes for the run and sets them back)."""
+    head = WORK_HEAD
     folder = os.fsencode(work)
     try:
         diffs: List[Tuple[bytes, str]] = []
@@ -1111,7 +1205,7 @@ def work_changes(work: str, before: Dict[str, object]) -> str:
                 if n in old:
                     seen.add(n)
                     try:
-                        what = _fields(old[n], _entry_record(folder, n))
+                        what = _fields(old[n], _entry_record(folder, n, old[n].get("size")), status)
                     except FileNotFoundError:
                         what = "removed while the folder was read"
                     if what:
@@ -1134,7 +1228,10 @@ def work_changes(work: str, before: Dict[str, object]) -> str:
         for n in sorted(set(old) - seen):
             diffs.append((n, f"{_shown(n)}: missing"))
         st = os.lstat(folder)
-        what = _fields(before["folder"], dict(_meta(st), time=st.st_mtime_ns))
+        now = dict(_meta(st), time=st.st_mtime_ns)
+        if _STATUS_TIME:
+            now["status"] = st.st_ctime_ns
+        what = _fields(before["folder"], now, status)
     except OSError as err:
         return head + f"the folder could not be read again ({type(err).__name__})"
     diffs.sort()
@@ -1147,6 +1244,154 @@ def work_changes(work: str, before: Dict[str, object]) -> str:
     if extra:
         parts.append(f"and {extra} more")
     return head + "; ".join(parts) if parts else ""
+
+
+def read_stderr_tail(path: str, n: int = 600) -> str:
+    """The last `n` bytes of <work>/stderr.txt, decoded (errors replaced), for the reason of an output without levels.
+    Read after the check of the work folder (§6.7), so not through the name alone: only a regular file with one
+    name, opened with O_NOFOLLOW | O_NONBLOCK and the same file as the lstat saw (where O_NOFOLLOW is missing the
+    lstat decides); anything else gives "". Measured before this function, with the name replaced by a link to a
+    file of the user right after the check: the last bytes of that file were in the reason."""
+    fd = -1
+    try:
+        st = os.lstat(path)
+        if not stat.S_ISREG(st.st_mode):        # one name: checked on the descriptor below
+            return ""
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                     | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
+        fs = os.fstat(fd)
+        if not (stat.S_ISREG(fs.st_mode) and fs.st_nlink == 1 and (fs.st_dev, fs.st_ino) == (st.st_dev, st.st_ino)):
+            return ""
+        os.lseek(fd, max(0, fs.st_size - n), os.SEEK_SET)
+        return os.read(fd, n).decode("utf-8", "replace")
+    except OSError:
+        return ""
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def remove_tree(path: str) -> None:
+    """Removes the folder `path` and what it holds; never raises, never follows a link. Up to 0.3.0 the folders were
+    removed with shutil.rmtree(ignore_errors=True), measured on the work folder after a run (§6.7): a folder left
+    without the owner's read, write or search permission (modes 000, 0300, 0400, 0500, at the top or inside) stayed in
+    the temporary directory; on Python 3.11 a tree of 1 200 folders one inside the other made rmtree raise
+    RecursionError out of run_port. Here (POSIX with descriptors: Linux, macOS) the tree is walked without recursion
+    and with one descriptor open at a time: each folder is opened with O_DIRECTORY | O_NOFOLLOW relative to its
+    parent, given the owner's rwx through that descriptor (Linux, when it cannot be opened for reading: through an
+    O_PATH descriptor and /proc/self/fd; macOS: fchmodat without following), emptied, and the walk goes back up
+    through ".." only if ".." is the folder it came from (device and inode). Elsewhere (Windows):
+    shutil.rmtree(ignore_errors=True), RecursionError caught. What a process still running writes there meanwhile
+    (one that left the engine's process group: §6.3) can keep the folder from being removed: the removal is tried
+    again after each of REMOVE_PAUSES seconds, then the folder stays."""
+    for pause in (0.0,) + REMOVE_PAUSES:
+        time.sleep(pause)
+        try:
+            if _FD_REMOVAL:
+                _remove_tree_fd(path)
+            else:
+                shutil.rmtree(path, ignore_errors=True)
+        except (OSError, RecursionError, ValueError):
+            pass
+        if not os.path.lexists(path):
+            return
+
+
+REMOVE_PAUSES = (0.05, 0.1, 0.2)   # seconds before each new try of remove_tree (a writer that outlived the run)
+
+
+_FD_REMOVAL = (os.name == "posix" and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
+               and os.open in os.supports_dir_fd and os.unlink in os.supports_dir_fd
+               and os.rmdir in os.supports_dir_fd and os.scandir in os.supports_fd)
+_DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+
+
+def _owner_rwx_unopened(name: str, dir_fd: int) -> None:
+    """Gives the folder `name` (in `dir_fd`) the owner's rwx without following a link, when it cannot be opened."""
+    if hasattr(os, "O_PATH") and os.path.isdir("/proc/self/fd"):
+        pfd = os.open(name, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
+        try:
+            st = os.fstat(pfd)
+            if stat.S_ISDIR(st.st_mode):
+                os.chmod(f"/proc/self/fd/{pfd}", stat.S_IMODE(st.st_mode) | 0o700)
+        finally:
+            os.close(pfd)
+    elif os.chmod in os.supports_follow_symlinks and os.chmod in os.supports_dir_fd:
+        st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        if stat.S_ISDIR(st.st_mode):
+            os.chmod(name, stat.S_IMODE(st.st_mode) | 0o700, dir_fd=dir_fd, follow_symlinks=False)
+
+
+def _open_dir(name: str, dir_fd: Optional[int]) -> int:
+    """A descriptor of the folder `name` (never through a link) with the owner's rwx on it."""
+    try:
+        fd = os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
+    except PermissionError:
+        if dir_fd is None:                       # the top folder: made by the host in its temporary directory
+            st = os.lstat(name)
+            if not stat.S_ISDIR(st.st_mode):
+                raise
+            os.chmod(name, stat.S_IMODE(st.st_mode) | 0o700)
+        else:
+            _owner_rwx_unopened(name, dir_fd)
+        fd = os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
+    try:
+        st = os.fstat(fd)
+        if stat.S_IMODE(st.st_mode) & 0o700 != 0o700:
+            os.fchmod(fd, stat.S_IMODE(st.st_mode) | 0o700)
+    except OSError:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _remove_tree_fd(top: str) -> None:
+    fd = _open_dir(top, None)
+    st = os.fstat(fd)
+    stack: List[Tuple[str, Tuple[int, int], List[str]]] = [("", (st.st_dev, st.st_ino), [])]
+    fresh = True                                          # the folder on top of the stack has not been listed yet
+    try:
+        while True:
+            name, ident, todo = stack[-1]
+            if fresh:
+                with os.scandir(fd) as it:
+                    for e in it:
+                        try:
+                            if e.is_dir(follow_symlinks=False):
+                                todo.append(e.name)
+                            else:
+                                os.unlink(e.name, dir_fd=fd)
+                        except OSError:
+                            pass
+                fresh = False
+            if todo:
+                sub = todo.pop()
+                try:
+                    cfd = _open_dir(sub, fd)
+                except OSError:
+                    continue                                  # left where it is
+                cst = os.fstat(cfd)
+                os.close(fd)
+                fd = cfd
+                stack.append((sub, (cst.st_dev, cst.st_ino), []))
+                fresh = True
+                continue
+            if len(stack) == 1:
+                break
+            stack.pop()
+            pfd = os.open("..", _DIR_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = pfd
+            pst = os.fstat(fd)
+            if (pst.st_dev, pst.st_ino) != stack[-1][1]:
+                return                                        # moved while it was removed: stop here
+            try:
+                os.rmdir(name, dir_fd=fd)
+            except OSError:
+                pass
+    finally:
+        os.close(fd)
+    os.rmdir(top)
 
 
 def _run_wasm(work: str, out_path: str, seconds: int, site_packages: List[str], stderr_path: str):
@@ -1167,18 +1412,27 @@ def _run_wasm(work: str, out_path: str, seconds: int, site_packages: List[str], 
             _chmod_regular_file(p, 0o444, (st.st_dev, st.st_ino))
     work_mode = stat.S_IMODE(os.lstat(work).st_mode)
     os.chmod(work, 0o555)
+    # the status-change times are recorded here, after the modes are set for the run, and read again before they are
+    # set back: run() cannot compare them (the host itself changes them), so they are compared here (§6.7)
+    folder = os.fsencode(work)
+    mid = _status_times(folder) if _STATUS_TIME else {}
+    if mid:
+        _wait_clock_past(folder, max(mid.values()))
+    moved = ""
     cmd = _wasm_cmd(facts["exe"], facts["folder"], [(work, "/work"), (outdir, "/out")],
                     seconds, {"HOME": "/nohome", "RIGOROUS_LEVELS_OUTPUT_DIR": "/out"})
     cmd += ["-I", "-S", "-B", "/work/" + RUNNER_NAME, "/work"]
     try:
         rc, timed_out = _run(cmd, seconds + 5, os.path.join(outdir, "stderr.txt"), {"PATH": os.environ.get("PATH", "")})
     finally:
+        if mid:
+            moved = _status_moved(folder, mid)
         os.chmod(work, work_mode)
         for p, mode, same in saved:
             _chmod_regular_file(p, mode, same)
     _copy_run_stderr(os.path.join(outdir, "stderr.txt"), stderr_path)
     return rc, timed_out, (f"wasmtime (WASI, no sockets, pre-opened folders only, max memory {WASM_MAX_MEMORY >> 20} MiB); "
-                           f"CPython {facts['version'][0]}.{facts['version'][1]} for WASI: numpy {facts['numpy']}")
+                           f"CPython {facts['version'][0]}.{facts['version'][1]} for WASI: numpy {facts['numpy']}"), moved
 
 
 # ── public contract ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -1230,9 +1484,9 @@ def run(engine: str, work: str, out_path: str, seconds: int, mem_mib: int, site_
     res = _run_engine(engine, work, out_path, seconds, mem_mib, site_packages, python, image)
     rc, timed_out, descr = res[:3]
     limit = res[3] if len(res) > 3 else ""
-    changed = work_changes(work, before)
-    if changed:
-        limit = changed + (f"; {limit}" if limit else "")
+    changed = work_changes(work, before, status=engine != "wasm")
+    if changed:                                    # the wasm status-change reason adds nothing to another difference
+        limit = changed + (f"; {limit}" if limit and not limit.startswith(WORK_HEAD) else "")
     vouched = _VOUCHED.get("wasmtime" if engine == "wasm" else engine)
     if vouched:
         descr += (f"; engine binary {vouched} is user-owned, accepted because RIGOROUS_LEVELS_TRUSTED_ENGINES lists it "

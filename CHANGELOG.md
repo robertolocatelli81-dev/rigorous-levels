@@ -19,8 +19,9 @@ replaced by a link, an entry created and removed, the same with the folder's tim
 records the folder before the run and reads it again after it: 21 of the 22 give `ERROR` with the reason
 "work folder changed during the run (it is read-only for the port): " followed by the entries named (kind, mode,
 inode, number of names, owner, size, time, content; up to 20, the others counted), for every output of a batch,
-before the timeout and the host caps; the last one, with the folder's time set back by the port, is the limit written
-in §6.7 (still `OK`), and the control stays `OK`. Script: `prova_D1.py` in the author's notes of 2026-11-20.
+before the timeout and the host caps; the last one, with the folder's time set back by the port, stayed `OK` in that
+first version and gives `ERROR` since the review below; the control stays `OK`. Script: `prova_D1.py` in the author's
+notes of 2026-11-20.
 
 Same class, found on the way and changed: `_copy_run_stderr` wrote the wasm run's standard error into
 `<work>/stderr.txt` with `open(dst, "wb")`, which follows a link: with that name replaced by a symbolic link to a file
@@ -29,16 +30,45 @@ Now it opens it with `O_NOFOLLOW` and without `O_TRUNC`, writes only into a regu
 through the descriptor. And the wasm engine sets back, after the run, the modes it recorded before it, each only on the
 file it was recorded for (before: 0644 on every file and 0755 on the folder, which is created 0700).
 
-`tests/test_multiport.py` `TestWorkFolderClosed20261120` (13 tests: every kind of entry and change named, 23 kinds on
+In that first version `tests/test_multiport.py` `TestWorkFolderClosed20261120` had 13 tests (every kind of entry and change named, 23 kinds on
 Linux; batch, timeout and cap precedence; 57 entries, 20 named and 37 counted, the same reason whatever order the
 folder is listed in; 60 seeded random sets of changes and names; the time-set-back limit; a folder that cannot be read
 again; the content read only from the file recorded; the wasm modes, twice; the copy of stderr; the real engines
 available leave the folder unchanged). On the code before this change 11 of the 13 fail (the control and the
-real-engine test pass). 25 mutants of the changed lines of `isolation.py`, 25 killed (2 alive at the first round, the
+real-engine test pass); 25 mutants of the changed lines of `isolation.py`, 25 killed (2 alive at the first round, the
 order of the listing and the identity of the hashed file: covered by the two tests added for them). Two earlier tests changed: `test_vouched_engine_named_in_the_description` now gives `run()` a
 real folder, and the stderr test with `O_NOFOLLOW` counts the second `os.open` (the copy) and no longer reuses the
 copy of the call before. Not measured: Windows, macOS and the container engines (CI jobs); whether a WASI guest under
 wasmtime can write into `/work` (wasmtime is not installed where this was measured).
+
+Review of that change (2026-11-21), measured on its code with the engine replaced, then on the code of this review
+(Python 3.11, Linux, btrfs; §6.7 revised before the code):
+- six changes gave `OK`: an extended attribute on `request.json` and on the folder, the content of `port_runner.py`
+  changed and set back with its times, a second name of `request.json` made and removed, an entry created and removed
+  with the folder's time set back, the access time of `request.json` changed. They all move the status-change time
+  (`st_ctime`), which a process cannot set: on POSIX it is now recorded for the folder and every entry but
+  `stderr.txt`, the record ends when the file system clock has passed it, and the six give `ERROR` ("status-change
+  time changed …"); for `wasm` it is recorded after the engine's own chmod and read before the modes are set back.
+- `request.json` made a sparse file of 1 GiB / 4 GiB: the check read it all (1.10 s / 4.35 s); now a recorded file is
+  hashed only at its recorded size and never beyond it (0.00 s).
+- the last 600 bytes of `stderr.txt` for the reason of an output without levels were read by name after the check:
+  with the name swapped for a link to a file of the user right after the check, that file's end was in the reason;
+  now `read_stderr_tail` reads a regular file with one name only, the same inode as its `lstat`.
+- where `O_NOFOLLOW` is missing (Windows, simulated by setting it to 0) the copy of the wasm run's standard error
+  wrote through a link at `stderr.txt` into the file of the user; now the `lstat` decides and a link is not opened.
+- removal: a work folder left 000, 0300, 0400 or 0500, or holding a folder left 000 or 0500, stayed in the temporary
+  directory (6 of 6), and on Python 3.11 a tree of 1 200 or 5 000 folders one inside the other made `shutil.rmtree`
+  raise `RecursionError` out of `run_port`. `isolation.remove_tree` removes them all without recursion and without
+  following links (5 000 levels: 2.3 s), and tries again after 0.05, 0.1 and 0.2 s: with a process that outlived the
+  run and kept writing in the folder for 0.25 s, one try left the folder in 103 of 150 runs, the tries in 0 of 150.
+`TestWorkFolderClosed20261120` now has 24 tests: one of the 13 (the time-set-back limit, which now gives `ERROR`)
+replaced, 12 added (the six changes above, a change made right after the record, the wasm status time, the size of
+what is hashed, the tail of `stderr.txt` in `run_port` and `run_ports`, the copy of stderr without `O_NOFOLLOW` and
+with a second name made after the `lstat`, the folder time without status time, the removal cases, the removal tried
+again, the walk stopping when `..` is another folder). On the code before this review the 12 added fail (22
+failures and 9 errors with the sub-cases), the 12 others pass. Mutants of the changed lines of `isolation.py` and `multiport.py`: 50
+run, 46 killed at the first round; the 4 alive (no new try of the removal, the number of names of the copy's
+destination, the tail and the removal in `run_ports`) killed after the tests named above were added or changed.
 
 ### The wasm engine no longer changes the mode of what a link in the work folder names (2026-11-20)
 

@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 
@@ -1689,6 +1690,11 @@ class TestWasmHardLinkAndStderr20261120(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
 
 
+def isolation_status_time():
+    """POSIX: st_ctime is the status-change time (on Windows the creation time)"""
+    return os.name == "posix"
+
+
 class TestWorkFolderClosed20261120(unittest.TestCase):
     """docs/PORT_CONTRACT.md §6.7 (rule of 2026-11-20): the work folder is read-only for the port, so after the run any
     entry the host did not put there, and any change to one it did, makes the outputs ERROR with a reason naming them.
@@ -1713,7 +1719,7 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
         return MP.Request(port=port, model=ROTOR, levels=6, truncation={"ncut": 30}, unit="GHz", seconds=5, mem_mib=256,
                           site_packages=())
 
-    def _go(self, plant, batch=0, timed_out=False, limit=""):
+    def _go(self, plant, batch=0, timed_out=False, limit="", output=True):
         """run_port (or run_ports with `batch` requests) through the replaced engine; returns the outputs"""
         from unittest import mock
         from rigorous_levels import isolation
@@ -1725,8 +1731,9 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
                 f.write(b"stderr of the run\n")
             one = {"contract": MP.CONTRACT, "port": "numpy_rotor", "solver_version": "x", "levels": [1.0] * 6,
                    "unit": "GHz", "state": "OK", "reason": "", "seconds": 0.1}
-            with open(out_path, "w") as f:
-                json.dump([one] * batch if batch else one, f)
+            if output:
+                with open(out_path, "w") as f:
+                    json.dump([one] * batch if batch else one, f)
             plant(work)
             return (0, False, "replaced engine", limit) if not timed_out else (None, True, "replaced engine", limit)
         with mock.patch.object(isolation, "probe", return_value={}), mock.patch.object(isolation, "_run_engine", engine):
@@ -1957,16 +1964,425 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
         self.assertEqual(runs, 60)
         self.assertGreater(errors, 40)
 
-    def test_not_seen_when_the_folder_time_is_set_back(self):
-        """the limit written in §6.7, measured: an entry created and removed, with the folder's time set back"""
-        def plant(w):
+    def test_changes_undone_are_seen_through_the_status_time(self):
+        """POSIX: a change undone before the run ends still moves the status-change time (st_ctime), which a process
+        cannot set back: an entry created and removed with the folder's time set back, content changed and set back
+        with its time, a second name made and removed, the access time changed, an extended attribute (where the file
+        system has them). On 439a6b5 all of them gave OK."""
+        if not isolation_status_time():
+            self.skipTest("no status-change time here (Windows: st_ctime is the creation time)")
+
+        def folder_back(w):
             st = os.lstat(w)
             self._create_remove(w)
             os.utime(w, ns=(st.st_atime_ns, st.st_mtime_ns))
-        u, = self._go(plant)
+
+        def content_back(w):
+            p = os.path.join(w, "port_runner.py")
+            st = os.lstat(p)
+            with open(p, "rb") as f:
+                b = f.read()
+            with open(p, "r+b") as f:
+                f.write(b"#")
+            with open(p, "r+b") as f:
+                f.write(b[:1])
+            os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+        def second_name(w):
+            q = os.path.join(self.d, "second")
+            os.link(os.path.join(w, "request.json"), q)
+            os.unlink(q)
+
+        def access_time(w):
+            p = os.path.join(w, "request.json")
+            st = os.lstat(p)
+            os.utime(p, ns=(st.st_atime_ns + 10 ** 9, st.st_mtime_ns))
+        cases = [("the folder: status-change time changed", folder_back),
+                 ("'port_runner.py': status-change time changed", content_back),
+                 ("'request.json': status-change time changed", access_time)]
+        if hasattr(os, "link"):
+            cases.append(("'request.json': status-change time changed", second_name))
+        if hasattr(os, "setxattr"):
+            probe = os.path.join(self.d, "xattr_probe")
+            open(probe, "w").close()
+            try:
+                os.setxattr(probe, "user.x", b"1")
+                cases.append(("'request.json': status-change time changed",
+                              lambda w: os.setxattr(os.path.join(w, "request.json"), "user.x", b"1")))
+                cases.append(("the folder: status-change time changed", lambda w: os.setxattr(w, "user.x", b"1")))
+            except OSError:                                       # a file system without user attributes
+                pass
+        for named, plant in cases:
+            with self.subTest(named=named):
+                u, = self._go(plant)
+                self.assertEqual(u.state, "ERROR", u)
+                self.assertIn(self.HEAD + named, u.reason)
+        if sys.platform.startswith("linux"):
+            self.assertGreaterEqual(len(cases), 4)
+        u, = self._go(lambda w: None)                             # control
+        self.assertEqual((u.state, u.reason), ("OK", ""))
+        u, = self._go(lambda w: os.listdir(w))                    # control: reading changes no status time
         self.assertEqual(u.state, "OK")
-        u, = self._go(self._create_remove)                        # control: without the time set back
-        self.assertEqual(u.state, "ERROR")
+
+    def test_change_right_after_the_record_is_seen(self):
+        """work_snapshot returns only when the file system clock has passed what it recorded: a change made at once,
+        in the same coarse tick, still moves the status-change time (100 runs, no pause)"""
+        from rigorous_levels import isolation
+        if not isolation_status_time():
+            self.skipTest("no status-change time here")
+        seen = 0
+        for _ in range(100):
+            w = tempfile.mkdtemp(dir=self.d)
+            for n in ("request.json", "stderr.txt"):
+                open(os.path.join(w, n), "w").close()
+            before = isolation.work_snapshot(w)
+            os.setxattr(w, "user.y", b"1") if hasattr(os, "setxattr") and self._xattr_ok(w) else os.chmod(w, 0o700)
+            seen += isolation.work_changes(w, before) != ""
+        self.assertEqual(seen, 100)
+
+    @staticmethod
+    def _xattr_ok(w):
+        try:
+            os.setxattr(w, "user.probe", b"1")
+            os.removexattr(w, "user.probe")
+            return True
+        except OSError:
+            return False
+
+    def test_wasm_status_time(self):
+        """wasm: the host changes the modes around the run, so the status-change times are recorded after that change
+        and read again before the modes are set back"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not isolation_status_time():
+            self.skipTest("no status-change time here")
+        for change in (None, "content_back", "folder_back", "new_entry"):
+            w, outdir = tempfile.mkdtemp(dir=self.d), tempfile.mkdtemp(dir=self.d)
+            for n in ("request.json", isolation.RUNNER_NAME, "output.json"):
+                with open(os.path.join(w, n), "w") as f:
+                    f.write("x")
+            open(os.path.join(outdir, "output.json"), "w").close()
+
+            def fake_run(cmd, timeout, stderr_path, env, w=w, change=change):
+                open(stderr_path, "wb").close()
+                if change == "content_back":
+                    p = os.path.join(w, "request.json")
+                    st = os.lstat(p)
+                    os.chmod(p, 0o644)
+                    with open(p, "w") as f:
+                        f.write("x")
+                    os.chmod(p, 0o444)
+                    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
+                elif change == "new_entry":                       # a difference of its own and a status change
+                    os.chmod(w, 0o755)
+                    open(os.path.join(w, "new"), "w").close()
+                    os.chmod(w, 0o555)
+                elif change == "folder_back":
+                    st = os.lstat(w)
+                    os.chmod(w, 0o755)
+                    self._create_remove(w)
+                    os.chmod(w, 0o555)
+                    os.utime(w, ns=(st.st_atime_ns, st.st_mtime_ns))
+                return 0, False
+            facts = {"exe": "wasmtime", "folder": self.d, "version": [3, 12], "numpy": "-"}
+            with mock.patch.object(isolation, "probe", return_value=facts), mock.patch.object(isolation, "_run", fake_run):
+                limit = isolation.run("wasm", w, os.path.join(outdir, "output.json"), 1, 1, [])[3]
+            with self.subTest(change=change):
+                self.assertLessEqual(limit.count(self.HEAD), 1)
+                if change is None:
+                    self.assertEqual(limit, "")
+                elif change == "content_back":
+                    self.assertEqual(limit, self.HEAD + "'request.json': " + isolation._STATUS_WORDS)
+                elif change == "new_entry":
+                    self.assertTrue(limit.startswith(self.HEAD + "'new': file the host did not put there"), limit)
+                    self.assertNotIn(isolation._STATUS_WORDS, limit)
+                else:
+                    self.assertEqual(limit, self.HEAD + "the folder: " + isolation._STATUS_WORDS)
+
+    def test_content_read_only_up_to_the_recorded_size(self):
+        """a recorded file made larger is a difference and is not read (before: read to its end, 4 GiB sparse in 4 s)"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        w = tempfile.mkdtemp(dir=self.d)
+        with open(os.path.join(w, "request.json"), "w") as f:
+            f.write("{}")
+        before = isolation.work_snapshot(w)
+        with open(os.path.join(w, "request.json"), "r+b") as f:
+            f.truncate(1 << 30)
+        got, real = [], os.read
+
+        def rd(fd, n):
+            b = real(fd, n)
+            got.append(len(b))
+            return b
+        with mock.patch.object(isolation.os, "read", rd):
+            r = isolation.work_changes(w, before)
+        self.assertIn("'request.json': size 2 -> 1073741824", r)
+        self.assertLessEqual(sum(got), 3)                         # nothing beyond the recorded size (+1 to see the end)
+        a = os.path.join(self.d, "grow")
+        with open(a, "w") as f:
+            f.write("abc")
+        st = os.lstat(a)
+        with open(a, "a") as f:
+            f.write("d")                                          # grew after the lstat: not hashed
+        self.assertTrue(isolation._content_sha256(os.fsencode(a), st).startswith("not read to the end"))
+
+    def test_stderr_tail_read_only_from_the_file_checked(self):
+        """the tail of <work>/stderr.txt in the reason of an output without levels: never through a link put there
+        after the check (before: the last bytes of the user's file were in the reason)"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not (hasattr(os, "symlink") and os.name == "posix"):
+            self.skipTest("links")
+        real = isolation.work_changes
+
+        def then_swap(work, before, *a, **k):
+            r = real(work, before, *a, **k)
+            p = os.path.join(work, "stderr.txt")
+            os.unlink(p)
+            os.symlink(self.victim, p)
+            return r
+        u, = self._go(lambda w: None)                             # control
+        self.assertEqual(u.state, "OK")
+        for batch in (0, 2):                                      # run_port and run_ports: "no output (…): <tail>"
+            with mock.patch.object(isolation, "work_changes", then_swap):
+                outs = self._go(lambda w: None, batch=batch, output=False)
+            self.assertTrue(all(o.state == "INVALID" and o.reason.startswith("no output") for o in outs), outs)
+            self.assertFalse(any("SECRET" in o.reason for o in outs), outs)
+        outs = self._go(lambda w: None, batch=2, output=False)    # control: the true stderr is in the reason
+        self.assertTrue(all("stderr of the run" in o.reason for o in outs), outs)
+        p = os.path.join(self.d, "e")
+        with open(p, "wb") as f:
+            f.write(b"a" * 700 + b"END")
+        self.assertEqual(isolation.read_stderr_tail(p), "a" * 597 + "END")
+        os.symlink(self.victim, os.path.join(self.d, "l"))
+        self.assertEqual(isolation.read_stderr_tail(os.path.join(self.d, "l")), "")
+        with mock.patch.object(isolation.os, "O_NOFOLLOW", 0):
+            self.assertEqual(isolation.read_stderr_tail(os.path.join(self.d, "l")), "")
+        if hasattr(os, "link"):
+            os.link(self.victim, os.path.join(self.d, "h"))
+            self.assertEqual(isolation.read_stderr_tail(os.path.join(self.d, "h")), "")      # a second name
+            os.unlink(os.path.join(self.d, "h"))
+        real_lstat = os.lstat
+
+        def lstat_of_other(path, *a, **k):                        # the lstat sees another file than the open
+            return real_lstat(self.victim if path == p else path, *a, **k)
+        with mock.patch.object(isolation.os, "lstat", lstat_of_other):
+            self.assertEqual(isolation.read_stderr_tail(p), "")
+
+    def test_no_status_time_the_folder_time_still_sees_create_and_remove(self):
+        """where the status-change time is not recorded (Windows), the fixed modification time of the folder still
+        shows an entry created and removed"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        w = tempfile.mkdtemp(dir=self.d)
+        isolation.work_snapshot(w)
+        self.assertEqual(os.lstat(w).st_mtime_ns, isolation.WORK_FOLDER_TIME_NS)    # the fixed time, whatever the tick
+        with mock.patch.object(isolation, "_STATUS_TIME", False):
+            u, = self._go(self._create_remove)
+            self.assertEqual(u.state, "ERROR")
+            self.assertIn("the folder: modification time changed (an entry was created or removed)", u.reason)
+            u, = self._go(lambda w: None)                         # control
+            self.assertEqual(u.state, "OK")
+
+    def test_copy_of_stderr_destination_link_is_not_opened(self):
+        """without O_NOFOLLOW a link at the destination is not even opened (a device it names could act on open), and
+        a file swapped in between the lstat and the open is not written"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not (hasattr(os, "symlink") and os.name == "posix"):
+            self.skipTest("links")
+        src, dst = os.path.join(self.d, "src"), os.path.join(self.d, "dst")
+        with open(src, "wb") as f:
+            f.write(b"stderr of the run\n")
+        os.symlink(self.victim, dst)
+        opened, real_open = [], os.open
+
+        def rec(path, flags, *a, **k):
+            opened.append(path)
+            return real_open(path, flags, *a, **k)
+        with mock.patch.object(isolation.os, "O_NOFOLLOW", 0), mock.patch.object(isolation.os, "open", rec):
+            isolation._copy_run_stderr(src, dst)
+        self.assertNotIn(dst, opened)
+        self.assertIn(src, opened)                                # control
+        other = os.path.join(self.d, "other")
+        open(other, "w").close()
+        real_lstat = os.lstat
+
+        def lstat_other(path, *a, **k):                           # the lstat sees a regular file, the open the link
+            return real_lstat(other if path == dst else path, *a, **k)
+        with mock.patch.object(isolation.os, "O_NOFOLLOW", 0), mock.patch.object(isolation.os, "lstat", lstat_other):
+            isolation._copy_run_stderr(src, dst)
+        with open(self.victim, "rb") as f:
+            self.assertEqual(f.read(), b"SECRET-OF-THE-USER\n")
+
+    def test_copy_of_stderr_without_o_nofollow(self):
+        """where O_NOFOLLOW is missing (Windows) the lstat decides: a link at the destination is not written through
+        (before: the file it named was overwritten)"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not (hasattr(os, "symlink") and os.name == "posix"):
+            self.skipTest("links")
+        src, dst = os.path.join(self.d, "src"), os.path.join(self.d, "dst")
+        with open(src, "wb") as f:
+            f.write(b"stderr of the run\n")
+        os.symlink(self.victim, dst)
+        with mock.patch.object(isolation.os, "O_NOFOLLOW", 0):
+            isolation._copy_run_stderr(src, dst)
+            os.unlink(dst)
+            isolation._copy_run_stderr(src, dst)                  # control: nothing there, the copy is made
+        with open(self.victim, "rb") as f:
+            self.assertEqual(f.read(), b"SECRET-OF-THE-USER\n")
+        with open(dst, "rb") as f:
+            self.assertEqual(f.read(), b"stderr of the run\n")
+
+    def test_folders_left_without_permissions_or_deep_are_removed(self):
+        """the work folder is removed whatever the run left: modes 000, 0300, 0400, 0500 at the top or inside, 1 200
+        and 5 000 folders one inside the other (3.11: RecursionError out of run_port before), 3 000 folders side by
+        side; links inside are removed, never followed"""
+        if os.name != "posix":
+            self.skipTest("POSIX modes")
+        vdir = os.path.join(self.d, "vdir")
+        os.mkdir(vdir)
+        with open(os.path.join(vdir, "keep"), "w") as f:
+            f.write("k")
+        os.chmod(vdir, 0o700)
+
+        def deep(n):
+            def plant(w):                                     # relative to a descriptor: paths get too long
+                fd = os.open(w, os.O_RDONLY)
+                try:
+                    for _ in range(n):
+                        os.mkdir("d", dir_fd=fd)
+                        nfd = os.open("d", os.O_RDONLY, dir_fd=fd)
+                        os.close(fd)
+                        fd = nfd
+                finally:
+                    os.close(fd)
+            return plant
+
+        def sub(mode):
+            def plant(w):
+                s = os.path.join(w, "sub")
+                os.mkdir(s)
+                os.mkdir(os.path.join(s, "inner"))
+                with open(os.path.join(s, "inner", "f"), "w") as f:
+                    f.write("x")
+                os.symlink(vdir, os.path.join(s, "inner", "to_user_dir"))
+                os.chmod(os.path.join(s, "inner"), mode)
+                os.chmod(s, mode)
+            return plant
+
+        def wide(w):
+            for i in range(3000):
+                os.mkdir(os.path.join(w, f"s{i}"))
+        cases = [("top 000", lambda w: os.chmod(w, 0o000)), ("top 0300", lambda w: os.chmod(w, 0o300)),
+                 ("top 0400", lambda w: os.chmod(w, 0o400)), ("top 0500", lambda w: os.chmod(w, 0o500)),
+                 ("deep 1200", deep(1200)), ("deep 5000", deep(5000)), ("wide 3000", wide)]
+        cases += [(f"inside {oct(m)}", sub(m)) for m in (0o000, 0o300, 0o400, 0o500)]
+
+        def outlives(w):                                          # a writer still running after the run, for 0.15 s
+            import threading
+
+            def write():
+                end = time.monotonic() + 0.15
+                i = 0
+                while time.monotonic() < end:
+                    try:
+                        open(os.path.join(w, f"late{i}"), "w").close()
+                    except OSError:
+                        return
+                    i += 1
+                    time.sleep(0.002)
+            threading.Thread(target=write, daemon=True).start()
+            time.sleep(0.01)
+        cases.append(("writer outlives the run", outlives))
+        for name, plant in cases:
+            with self.subTest(case=name):
+                u, = self._go(plant)                              # _go asserts the work folder is gone
+                self.assertEqual(u.state, "ERROR")
+        for name, plant in (("batch: deep 1200", deep(1200)), ("batch: top 000", lambda w: os.chmod(w, 0o000))):
+            with self.subTest(case=name):
+                outs = self._go(plant, batch=2)                   # run_ports removes it too
+                self.assertEqual([o.state for o in outs], ["ERROR"] * 2)
+        self.assertEqual(sorted(os.listdir(vdir)), ["keep"])
+        self.assertEqual(stat.S_IMODE(os.stat(vdir).st_mode), 0o700)
+
+    def test_remove_tree_tries_again(self):
+        """a first try that leaves the folder (a writer that outlived the run) is followed by the next ones"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        top = tempfile.mkdtemp(dir=self.d)
+        open(os.path.join(top, "f"), "w").close()
+        tries, real = [], (isolation._remove_tree_fd if isolation._FD_REMOVAL else None)
+
+        def first_fails(path):
+            tries.append(path)
+            if len(tries) == 1:
+                raise OSError("busy")
+            if real:
+                real(path)
+            else:
+                shutil.rmtree(path)
+        name = "_remove_tree_fd" if isolation._FD_REMOVAL else None
+        if name is None:
+            self.skipTest("descriptor removal not used here")
+        with mock.patch.object(isolation, name, first_fails):            # the pauses of the library
+            isolation.remove_tree(top)
+        self.assertEqual(len(tries), 2)
+        self.assertFalse(os.path.lexists(top))
+
+    def test_copy_of_stderr_second_name_made_after_the_lstat(self):
+        """the destination had one name at the lstat and two at the open: not written"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not hasattr(os, "link"):
+            self.skipTest("no os.link")
+        src, dst = os.path.join(self.d, "src"), os.path.join(self.d, "dst")
+        with open(src, "wb") as f:
+            f.write(b"stderr of the run\n")
+        with open(dst, "wb") as f:
+            f.write(b"old\n")
+        real_lstat = os.lstat
+
+        def lstat_then_link(path, *a, **k):
+            st = real_lstat(path, *a, **k)
+            if path == dst and not os.path.lexists(dst + ".2"):
+                os.link(dst, dst + ".2")
+            return st
+        with mock.patch.object(isolation.os, "lstat", lstat_then_link):
+            isolation._copy_run_stderr(src, dst)
+        with open(dst, "rb") as f:
+            self.assertEqual(f.read(), b"old\n")
+        os.unlink(dst + ".2")
+        isolation._copy_run_stderr(src, dst)                      # control: one name again
+        with open(dst, "rb") as f:
+            self.assertEqual(f.read(), b"stderr of the run\n")
+
+    def test_remove_tree_stops_if_the_parent_is_not_the_one_it_came_from(self):
+        """going back up through "..": if the folder was moved meanwhile, nothing above it is removed"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not isolation._FD_REMOVAL:
+            self.skipTest("descriptor removal not used here")
+        top = tempfile.mkdtemp(dir=self.d)
+        os.makedirs(os.path.join(top, "a", "b"))
+        with open(os.path.join(top, "a", "f"), "w") as f:
+            f.write("x")
+        real_open, calls = os.open, []
+
+        def open_dotdot(path, flags, *a, **k):
+            if path == "..":
+                calls.append(1)
+                return real_open(self.d, flags)                  # another folder than the parent
+            return real_open(path, flags, *a, **k)
+        with mock.patch.object(isolation.os, "open", open_dotdot), mock.patch.object(isolation, "REMOVE_PAUSES", (0, 0)):
+            isolation.remove_tree(top)
+        self.assertEqual(len(calls), 3)                           # once per try, stopped each time
+        self.assertTrue(os.path.isdir(os.path.join(top, "a")))   # stopped: "a" and the top stay
+        self.assertTrue(os.path.isdir(self.d))
+        isolation.remove_tree(top)                               # control
+        self.assertFalse(os.path.lexists(top))
 
     def test_folder_unreadable_after_the_run(self):
         from unittest import mock

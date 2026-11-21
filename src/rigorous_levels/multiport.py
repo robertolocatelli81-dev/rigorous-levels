@@ -354,12 +354,7 @@ def run_ports(requests, python: Optional[str] = None, *, engine: str = "auto", i
             return tuple(Output(r.port, "", (), r.unit, "ERROR", limit, 0.0, descr) for r in reqs)
         if timed_out:
             return tuple(_invalid(r, f"timeout: over {seconds + 5} s (batch)", float(seconds + 5), descr) for r in reqs)
-        err_path = os.path.join(work, "stderr.txt")
-        tail = ""
-        if os.path.isfile(err_path):
-            with open(err_path, "rb") as ferr:
-                ferr.seek(max(0, os.path.getsize(err_path) - 600))
-                tail = ferr.read().decode("utf-8", "replace")
+        tail = isolation.read_stderr_tail(os.path.join(work, "stderr.txt"))    # never through a link (§6.7)
         if _output_size(out_path) == 0:
             return tuple(_invalid(r, f"no output (exit code {rc}): {tail}", 0.0, descr) for r in reqs)
         doc, reason = read_output(out_path, OUTPUT_MAX_BYTES * len(reqs))
@@ -376,8 +371,8 @@ def run_ports(requests, python: Optional[str] = None, *, engine: str = "auto", i
                 outs.append(Output(u.port, u.solver_version, u.levels, u.unit, u.state, u.reason, u.seconds, descr))
         return tuple(outs)
     finally:
-        shutil.rmtree(work, ignore_errors=True)
-        shutil.rmtree(outdir, ignore_errors=True)
+        isolation.remove_tree(work)
+        isolation.remove_tree(outdir)
 
 
 def run_port(r: Request, python: Optional[str] = None, *, engine: str = "auto", image: Optional[str] = None) -> Output:
@@ -411,12 +406,7 @@ def run_port(r: Request, python: Optional[str] = None, *, engine: str = "auto", 
             return Output(r.port, "", (), r.unit, "ERROR", limit, 0.0, descr)
         if timed_out:
             return _invalid(r, f"timeout: over {r.seconds + 5} s", float(r.seconds + 5), descr)
-        err_path = os.path.join(work, "stderr.txt")
-        tail = ""
-        if os.path.isfile(err_path):
-            with open(err_path, "rb") as ferr:
-                ferr.seek(max(0, os.path.getsize(err_path) - 600))
-                tail = ferr.read().decode("utf-8", "replace")
+        tail = isolation.read_stderr_tail(os.path.join(work, "stderr.txt"))    # never through a link (§6.7)
         if _output_size(out_path) == 0:
             return _invalid(r, f"no output (exit code {rc}): {tail}", 0.0, descr)
         doc, reason = read_output(out_path)
@@ -429,8 +419,8 @@ def run_port(r: Request, python: Optional[str] = None, *, engine: str = "auto", 
             return _invalid(r, f"state OK but exit code {rc}: {tail}", 0.0, descr)
         return Output(u.port, u.solver_version, u.levels, u.unit, u.state, u.reason, u.seconds, descr)
     finally:
-        shutil.rmtree(work, ignore_errors=True)
-        shutil.rmtree(outdir, ignore_errors=True)
+        isolation.remove_tree(work)
+        isolation.remove_tree(outdir)
 
 
 def _output_size(path: str) -> int:
