@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import bisect
 import hashlib
+import itertools
 import json
 import os
 import secrets
@@ -1276,11 +1277,12 @@ def remove_tree(path: str) -> None:
     removed with shutil.rmtree(ignore_errors=True), measured on the work folder after a run (§6.7): a folder left
     without the owner's read, write or search permission (modes 000, 0300, 0400, 0500, at the top or inside) stayed in
     the temporary directory; on Python 3.11 a tree of 1 200 folders one inside the other made rmtree raise
-    RecursionError out of run_port. Here (POSIX with descriptors: Linux, macOS) the tree is walked without recursion
-    and with one descriptor open at a time: each folder is opened with O_DIRECTORY | O_NOFOLLOW relative to its
-    parent, given the owner's rwx through that descriptor (Linux, when it cannot be opened for reading: through an
-    O_PATH descriptor and /proc/self/fd, or fchmodat2 where there is no /proc; macOS: fchmodat without following),
-    emptied, and the walk goes back up through ".." only if ".." is the folder it came from (device and inode).
+    RecursionError out of run_port. Here (POSIX with descriptors: Linux, macOS) without recursion and never more than
+    two levels below the top: each folder is opened with O_DIRECTORY | O_NOFOLLOW relative to its parent and given the
+    owner's rwx through that descriptor (Linux, when it cannot be opened for reading: through an O_PATH descriptor and
+    /proc/self/fd, or fchmodat2 where there is no /proc; macOS: fchmodat without following); for each folder in the
+    top, its entries that are not folders are removed and its folders moved up into the top (rename relative to the
+    two descriptors, under a name not in use), then it is removed; this until the top holds no folder (_remove_tree_fd).
     Elsewhere (Windows):
     shutil.rmtree(ignore_errors=True), RecursionError caught. What a process still running writes there meanwhile
     (one that left the engine's process group: §6.3) can keep the folder from being removed: the removal is tried
@@ -1314,7 +1316,8 @@ REMOVE_SECONDS = 30.0              # seconds after which remove_tree stops walki
 
 _FD_REMOVAL = (os.name == "posix" and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
                and os.open in os.supports_dir_fd and os.unlink in os.supports_dir_fd
-               and os.rmdir in os.supports_dir_fd and os.scandir in os.supports_fd)
+               and os.rmdir in os.supports_dir_fd and os.rename in os.supports_dir_fd
+               and os.stat in os.supports_dir_fd and os.scandir in os.supports_fd)
 # whether os.chmod can change a name relative to a folder without following a link (macOS: fchmodat), read once at
 # import: a property of the platform. Read at each call before (CI 2026-11-22, macOS): a test that replaces os.chmod
 # to record the calls made it False, since the replacement is in neither set, and the call it watches never came
@@ -1400,57 +1403,80 @@ def _open_dir(name: str, dir_fd: Optional[int]) -> int:
 
 
 def _remove_tree_fd(top: str, end: float = float("inf")) -> None:
-    """One try. TimeoutError (an OSError) when time.monotonic() passes `end`: checked at each folder and each entry."""
+    """One try. TimeoutError (an OSError) when time.monotonic() passes `end`: checked at each folder and each entry.
+    No step is more than two levels below the top, and ".." is never opened: each folder inside a folder of the top is
+    moved up into the top before it is emptied in its turn. Up to 0.3.1 before the CI of 2026-11-22 the tree was walked
+    down and back up through ".." (one folder at a time, ".." checked to be the folder the walk came from): on macOS
+    (CI, Python 3.12 and 3.14) a tree of 5 000 folders one inside the other, made by the test through descriptors in
+    43 s and 53 s, was not removed within REMOVE_SECONDS (the walk stopped at 30 s and the folder stayed), while one of
+    1 200 was removed; on Linux the same tree takes a fraction of a second. A folder that cannot be opened, emptied or
+    moved stays where it is, and so does the top."""
     fd = _open_dir(top, None)
-    st = os.fstat(fd)
-    stack: List[Tuple[str, Tuple[int, int], List[str]]] = [("", (st.st_dev, st.st_ino), [])]
-    fresh = True                                          # the folder on top of the stack has not been listed yet
+    # the names of the folders moved up, never reused in a try. One in use: the move fails (a file, a folder that is
+    # not empty) or replaces an empty folder of the tree; what is in use is emptied in the same round, so the next
+    # round moves what is left
+    numbers = itertools.count()
     try:
         while True:
-            name, ident, todo = stack[-1]
-            if time.monotonic() > end:
-                raise TimeoutError("remove_tree: over REMOVE_SECONDS")
-            if fresh:
-                with os.scandir(fd) as it:
-                    for e in it:
-                        if time.monotonic() > end:
-                            raise TimeoutError("remove_tree: over REMOVE_SECONDS")
-                        try:
-                            if e.is_dir(follow_symlinks=False):
-                                todo.append(e.name)
-                            else:
-                                os.unlink(e.name, dir_fd=fd)
-                        except OSError:
-                            pass
-                fresh = False
-            if todo:
-                sub = todo.pop()
+            _check_end(end)
+            subs = _empty_files(fd, end)
+            if not subs:
+                break
+            progress = False
+            for sub in subs:
+                _check_end(end)
                 try:
                     cfd = _open_dir(sub, fd)
                 except OSError:
                     continue                                  # left where it is
-                cst = os.fstat(cfd)
-                os.close(fd)
-                fd = cfd
-                stack.append((sub, (cst.st_dev, cst.st_ino), []))
-                fresh = True
-                continue
-            if len(stack) == 1:
-                break
-            stack.pop()
-            pfd = os.open("..", _DIR_FLAGS, dir_fd=fd)
-            os.close(fd)
-            fd = pfd
-            pst = os.fstat(fd)
-            if (pst.st_dev, pst.st_ino) != stack[-1][1]:
-                return                                        # moved while it was removed: stop here
-            try:
-                os.rmdir(name, dir_fd=fd)
-            except OSError:
-                pass
+                try:
+                    for name in _empty_files(cfd, end):
+                        _check_end(end)
+                        try:
+                            os.close(_open_dir(name, cfd))    # its rwx: moving a folder to another parent writes its ".."
+                            os.rename(name, f".rigorous_levels_rm_{next(numbers)}", src_dir_fd=cfd, dst_dir_fd=fd)
+                        except OSError:
+                            pass
+                finally:
+                    os.close(cfd)
+                try:
+                    os.rmdir(sub, dir_fd=fd)
+                    progress = True
+                except OSError:
+                    pass
+            if not progress:
+                break                                         # what is left stays: the rmdir below fails
     finally:
         os.close(fd)
     os.rmdir(top)
+
+
+def _check_end(end: float) -> None:
+    if time.monotonic() > end:
+        raise TimeoutError("remove_tree: over REMOVE_SECONDS")
+
+
+def _empty_files(fd: int, end: float) -> List[str]:
+    """Removes every entry of the folder `fd` that is not a folder (a link is removed, never followed); returns the
+    names of its folders. The folder is listed through a new descriptor of ".", opened relative to `fd`: os.scandir on
+    `fd` itself shares its position with the listings before (measured on btrfs, Python 3.12: a folder listed once,
+    then changed, was listed again as empty)."""
+    subs = []
+    lfd = os.open(".", _DIR_FLAGS, dir_fd=fd)
+    try:
+        with os.scandir(lfd) as it:
+            for e in it:
+                _check_end(end)
+                try:
+                    if e.is_dir(follow_symlinks=False):
+                        subs.append(e.name)
+                    else:
+                        os.unlink(e.name, dir_fd=fd)
+                except OSError:
+                    pass
+    finally:
+        os.close(lfd)
+    return subs
 
 
 def _run_wasm(work: str, out_path: str, seconds: int, site_packages: List[str], stderr_path: str):

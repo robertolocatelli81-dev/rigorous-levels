@@ -2576,30 +2576,57 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
         with open(dst, "rb") as f:
             self.assertEqual(f.read(), b"stderr of the run\n")
 
-    def test_remove_tree_stops_if_the_parent_is_not_the_one_it_came_from(self):
-        """going back up through "..": if the folder was moved meanwhile, nothing above it is removed"""
+    def test_remove_tree_never_goes_up_nor_more_than_two_levels_down(self):
+        """the removal never opens ".." and never opens a folder more than two levels below the top: each folder inside
+        a folder of the top is moved up into the top first (on macOS, CI 2026-11-22, walking down 5 000 folders one
+        inside the other did not end within REMOVE_SECONDS); folders without permissions and links inside are handled,
+        and nothing outside the top is touched"""
         from unittest import mock
         from rigorous_levels import isolation
         if not isolation._FD_REMOVAL:
             self.skipTest("descriptor removal not used here")
+        vdir = os.path.join(self.d, "vdir")
+        os.mkdir(vdir)
+        with open(os.path.join(vdir, "keep"), "w") as f:
+            f.write("k")
         top = tempfile.mkdtemp(dir=self.d)
-        os.makedirs(os.path.join(top, "a", "b"))
-        with open(os.path.join(top, "a", "f"), "w") as f:
-            f.write("x")
-        real_open, calls = os.open, []
+        p = top
+        for i in range(60):
+            p = os.path.join(p, f"d{i}")
+            os.mkdir(p)
+            open(os.path.join(p, "f"), "w").close()
+            if i % 7 == 3:
+                os.symlink(vdir, os.path.join(p, "to_vdir"))
+        os.mkdir(os.path.join(top, ".rigorous_levels_rm_0"))      # the name of the first move, in use: that move
+        open(os.path.join(top, ".rigorous_levels_rm_0", "f"), "w").close()  # fails, a later round moves the folder
+        q = top
+        for i in range(60):                                     # modes set from the bottom would block the walk here
+            q = os.path.join(q, f"d{i}")
+        for i in reversed(range(60)):
+            if i % 5 == 2:
+                os.chmod(q, (0o000, 0o300, 0o400, 0o500)[i % 4])
+            q = os.path.dirname(q)
+        real_open, real_rename, depth, seen = os.open, os.rename, {}, {"max": 0, "dotdot": 0, "outside": 0}
 
-        def open_dotdot(path, flags, *a, **k):
+        def open_(path, flags, *a, dir_fd=None, **k):
             if path == "..":
-                calls.append(1)
-                return real_open(self.d, flags)                  # another folder than the parent
-            return real_open(path, flags, *a, **k)
-        with mock.patch.object(isolation.os, "open", open_dotdot), mock.patch.object(isolation, "REMOVE_PAUSES", (0, 0)):
+                seen["dotdot"] += 1
+            fd = real_open(path, flags, *a, dir_fd=dir_fd, **k)
+            depth[fd] = 0 if dir_fd is None else depth[dir_fd] + (path != ".")    # "." lists the same folder
+            seen["max"] = max(seen["max"], depth[fd])
+            return fd
+
+        def rename(src, dst, *a, src_dir_fd=None, dst_dir_fd=None, **k):
+            if depth.get(dst_dir_fd) != 0:
+                seen["outside"] += 1
+            return real_rename(src, dst, *a, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd, **k)
+        with mock.patch.object(isolation.os, "open", open_), mock.patch.object(isolation.os, "rename", rename):
             isolation.remove_tree(top)
-        self.assertEqual(len(calls), 3)                           # once per try, stopped each time
-        self.assertTrue(os.path.isdir(os.path.join(top, "a")))   # stopped: "a" and the top stay
-        self.assertTrue(os.path.isdir(self.d))
-        isolation.remove_tree(top)                               # control
         self.assertFalse(os.path.lexists(top))
+        self.assertEqual((seen["dotdot"], seen["outside"]), (0, 0))
+        self.assertLessEqual(seen["max"], 2)
+        self.assertEqual(sorted(os.listdir(vdir)), ["keep"])
+        self.assertEqual(sorted(os.listdir(self.d)), ["vdir", "victim"])
 
     def test_remove_tree_path_that_does_not_end_with_a_name(self):
         """a path ending with a separator, "." or "..": the system resolves a link there, so nothing is removed
@@ -2696,6 +2723,13 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
                 mock.patch.object(isolation, "REMOVE_SECONDS", 3.5), mock.patch.object(isolation.time, "sleep", lambda s: None):
             isolation.remove_tree(flat)                           # checked at each entry of one folder too
         self.assertEqual(len(os.listdir(flat)), 8)                # the first try stopped at its third entry
+        subs, ticks[0] = tempfile.mkdtemp(dir=self.d), 0.0
+        for i in range(10):
+            os.mkdir(os.path.join(subs, f"s{i}"))
+        with mock.patch.object(isolation.time, "monotonic", clock), \
+                mock.patch.object(isolation, "REMOVE_SECONDS", 13.5), mock.patch.object(isolation.time, "sleep", lambda s: None):
+            isolation.remove_tree(subs)                           # and at each folder of the top, empty ones too
+        self.assertEqual(len(os.listdir(subs)), 8)                # the end (14.5) passed at the third folder
         dig = ("import os, sys, time\nend = time.monotonic() + 1.2\nwhile time.monotonic() < end:\n"
                "    try:\n        os.chdir(sys.argv[1])\n        while time.monotonic() < end:\n"
                "            os.mkdir('d')\n            os.chdir('d')\n    except OSError:\n        pass\n")
@@ -2760,36 +2794,6 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
             isolation.remove_tree(top)
         self.assertFalse(os.path.lexists(top))
         self.assertEqual(sorted(modes), [0o700, 0o700, 0o700, 0o700])
-
-    def test_remove_tree_parent_on_another_device(self):
-        """going back up: ".." must be the folder it came from by device AND inode (two file systems number their
-        inodes on their own)"""
-        from unittest import mock
-        from rigorous_levels import isolation
-        if not isolation._FD_REMOVAL:
-            self.skipTest("descriptor removal not used here")
-        top = tempfile.mkdtemp(dir=self.d)
-        os.makedirs(os.path.join(top, "a", "b"))
-        real_open, real_fstat, parents = os.open, os.fstat, set()
-
-        def open_(path, flags, *a, **k):
-            fd = real_open(path, flags, *a, **k)
-            if path == "..":
-                parents.add(fd)
-            return fd
-
-        def fstat(fd):
-            st = real_fstat(fd)
-            if fd in parents:                                     # the same inode number on another device
-                parents.discard(fd)
-                return os.stat_result((st.st_mode, st.st_ino, st.st_dev + 1) + tuple(st)[3:])
-            return st
-        with mock.patch.object(isolation.os, "open", open_), mock.patch.object(isolation.os, "fstat", fstat), \
-                mock.patch.object(isolation, "REMOVE_PAUSES", ()):
-            isolation.remove_tree(top)
-        self.assertTrue(os.path.isdir(os.path.join(top, "a", "b")))   # stopped at the first step up
-        isolation.remove_tree(top)
-        self.assertFalse(os.path.lexists(top))
 
     def test_folder_unreadable_after_the_run(self):
         from unittest import mock
