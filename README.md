@@ -77,7 +77,7 @@ guaranteed_levels, ...`; the Italian names of 0.2.0 are deprecated aliases that 
 3. **The multiport** (`multiport`, `port_runner`, `isolation`; contract "rigorous-levels-port/0.3" in `docs/PORT_CONTRACT.md`):
    an external solver runs inside an isolation engine chosen from a closed, ordered list — `podman`, `docker`,
    `bwrap` (Linux), `sandbox-exec` (macOS), `appcontainer` (Windows), `wasm` (wasmtime + CPython for WASI) — each
-   with no network, a read-only file system, no real home, a minimal environment, time and memory limits (Unreleased:
+   with no network, a read-only file system, no real home, a minimal environment, time and memory limits (since 0.3.1:
    after the run the work folder must hold exactly what the host put there, otherwise every output is `ERROR` with
    the entries named, `docs/PORT_CONTRACT.md` §6.7) and a
    fail-closed probe (an engine that is missing or does not isolate is never used silently; on Linux and macOS every

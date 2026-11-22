@@ -169,7 +169,7 @@ dirty-output checks pass; S3-memory, S6, S7 need numpy and are skipped with that
 6.6 What no engine claims: protection against kernel exploits, side channels, or a compromised engine binary; the
 physics of the other solver.
 
-6.7 The work folder after the run (Unreleased; rule written on 2026-11-20 before the code, for every engine; revised
+6.7 The work folder after the run (0.3.1; rule written on 2026-11-20 before the code, for every engine; revised
 on 2026-11-21 after the review of that code, before the new code, and again that day after the second review:
 the removal). The work folder is read-only for the port, so after
 the run it must hold exactly what the host put there. Before the run the host puts in it `request.json`

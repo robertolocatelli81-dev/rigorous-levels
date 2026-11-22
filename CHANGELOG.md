@@ -1,9 +1,14 @@
 # Changelog
 
 All dates are from the author's system clock (Europe/Rome). Releases: 0.3.0 on 2026-11-12 (GitHub release with attested wheel and sdist; on PyPI since 2026-11-14, the same files). 0.1.0 and 0.2.0 were never
-released.
+released. 0.3.1 is dated 2026-11-22, the day its version number was set; it is released when the tag `v0.3.1` has its
+GitHub release.
 
-## Unreleased
+## 0.3.1 — 2026-11-22
+
+Defects of the multiport's isolation corrected (below). The public API (`rigorous_levels.__all__`), the request and
+output files of the port contract and its name "rigorous-levels-port/0.3" are those of 0.3.0; what changes for a
+port is §6.7 of `docs/PORT_CONTRACT.md`: a run that changes its read-only work folder now gives `ERROR`.
 
 ### The work folder must be unchanged after the run, otherwise the outputs are ERROR (2026-11-20)
 

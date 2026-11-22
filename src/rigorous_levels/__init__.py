@@ -14,7 +14,7 @@ The public English API is exposed here (`from rigorous_levels import Rotor, guar
 names of 0.2.0 are kept as deprecated aliases (DeprecationWarning). This package is not an external
 validator."""
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 from rigorous_levels.guaranteed_intervals import (GUARANTEED, WIDE, ArbMissing, DeadlineExceeded, Intervals, OutOfDomain,  # noqa: E402
                                            guaranteed_levels)

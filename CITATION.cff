@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use rigorous-levels, cite it as below. Nothing here is a third-party or accredited certification: a guaranteed interval follows from the proof in docs/PROOF.md and from the correctness of Arb/FLINT."
 title: "rigorous-levels: guaranteed eigenvalue intervals for the charge-basis rotor, the spherical rotor, the 1Σ molecule, the Mathieu characteristic values and the fluxonium, with a sandboxed multiport for external solvers"
 type: software
-version: 0.3.0
-date-released: "2026-11-12"
+version: 0.3.1
+date-released: "2026-11-22"
 doi: 10.5281/zenodo.24172688
 identifiers:
   - type: doi
