@@ -219,8 +219,10 @@ would take the mode, as measured on Linux with `fchmodat2` called by name; not m
 than two levels below the top folder and `..` is never opened (rule of 2026-11-22, replacing a walk down and back up
 through `..`): for each folder in the top, its entries that are not folders are removed, each of its folders is given
 the owner's rwx and moved up into the top (`renameat` relative to the two descriptors, as
-`.rigorous_levels_rm_<n>`, n counted from 0 in each try: if that name is in use the move fails, or replaces an empty
-folder, and a later round moves the folder), and it is removed; this until the top holds no folder. Measured with the walk down, in CI
+`.rigorous_levels_rm_` followed by 16 random hexadecimal digits, a name the port cannot guess and so cannot leave in the
+folder beforehand; if the name is in use all the same the move fails, or replaces an empty folder), and it is
+removed; this until the top holds no folder, or until a round removes no folder (what is left then stays, and the
+removal is tried again as below). Measured with the walk down, in CI
 on macOS: 5 000 folders one inside the other, made by the test through descriptors in 43 s and 53 s, were not removed
 within the 30 s below, while 1 200 were. Windows: `shutil.rmtree`. A path whose
 last part is not a name (a final separator, `.` or `..`) is not removed: the system resolves a link there. The

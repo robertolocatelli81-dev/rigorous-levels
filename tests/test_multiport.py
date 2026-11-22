@@ -2628,6 +2628,43 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(vdir)), ["keep"])
         self.assertEqual(sorted(os.listdir(self.d)), ["vdir", "victim"])
 
+    def test_remove_tree_names_of_the_moves_left_by_the_port(self):
+        """the names of the folders moved up cannot be held by what the port left: up to the review of 2026-11-22 they
+        were .rigorous_levels_rm_0, _1, ... from 0 in each try, and a top holding only .rigorous_levels_rm_0/x stayed
+        (x moved onto the name of its own parent, no round removed anything, each try began again from 0)"""
+        from rigorous_levels import isolation
+        for plant in ([".rigorous_levels_rm_0/x"], [".rigorous_levels_rm_0/x/y"],
+                      [f".rigorous_levels_rm_{i}/x" for i in range(12)], ["a/b", ".rigorous_levels_rm_0/x"]):
+            with self.subTest(plant=plant):
+                top = tempfile.mkdtemp(dir=self.d)
+                for p in plant:
+                    os.makedirs(os.path.join(top, p))
+                isolation.remove_tree(top)
+                self.assertFalse(os.path.lexists(top))
+
+    def test_remove_tree_folder_of_the_top_that_cannot_be_opened(self):
+        """a folder of the top that cannot be opened stays, and so does the top; the other folders are still emptied
+        and removed (a mutant that ended the round at that folder lived through the tests, review of 2026-11-22)"""
+        from unittest import mock
+        from rigorous_levels import isolation
+        if not isolation._FD_REMOVAL:
+            self.skipTest("descriptor removal not used here")
+        top = tempfile.mkdtemp(dir=self.d)
+        for i in range(8):
+            os.makedirs(os.path.join(top, f"s{i}", "x"))
+        real_open_dir, blocked = isolation._open_dir, []
+
+        def open_dir(name, dir_fd):
+            if dir_fd is not None and not blocked and name.startswith("s"):
+                blocked.append(name)                              # the first folder of the top asked for
+            if name in blocked:
+                raise PermissionError(13, "blocked by the test", name)
+            return real_open_dir(name, dir_fd)
+        with mock.patch.object(isolation, "_open_dir", open_dir):
+            isolation.remove_tree(top)
+        self.assertEqual(os.listdir(top), blocked)
+        self.assertEqual(os.listdir(os.path.join(top, blocked[0])), ["x"])
+
     def test_remove_tree_path_that_does_not_end_with_a_name(self):
         """a path ending with a separator, "." or "..": the system resolves a link there, so nothing is removed
         (measured before: with the top a link to a folder of the user and a final "/", that folder was emptied)"""
@@ -2730,6 +2767,13 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
                 mock.patch.object(isolation, "REMOVE_SECONDS", 13.5), mock.patch.object(isolation.time, "sleep", lambda s: None):
             isolation.remove_tree(subs)                           # and at each folder of the top, empty ones too
         self.assertEqual(len(os.listdir(subs)), 8)                # the end (14.5) passed at the third folder
+        moves, ticks[0] = tempfile.mkdtemp(dir=self.d), 0.0
+        for i in range(10):
+            os.makedirs(os.path.join(moves, "m", f"s{i}"))
+        with mock.patch.object(isolation.time, "monotonic", clock), \
+                mock.patch.object(isolation, "REMOVE_SECONDS", 17.5), mock.patch.object(isolation.time, "sleep", lambda s: None):
+            isolation.remove_tree(moves)                          # and at each folder moved up (review 2026-11-22)
+        self.assertEqual(len(os.listdir(os.path.join(moves, "m"))), 6)  # the end passed at the fifth move
         dig = ("import os, sys, time\nend = time.monotonic() + 1.2\nwhile time.monotonic() < end:\n"
                "    try:\n        os.chdir(sys.argv[1])\n        while time.monotonic() < end:\n"
                "            os.mkdir('d')\n            os.chdir('d')\n    except OSError:\n        pass\n")

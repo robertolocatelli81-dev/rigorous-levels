@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import bisect
 import hashlib
-import itertools
 import json
 import os
 import secrets
@@ -1282,7 +1281,7 @@ def remove_tree(path: str) -> None:
     owner's rwx through that descriptor (Linux, when it cannot be opened for reading: through an O_PATH descriptor and
     /proc/self/fd, or fchmodat2 where there is no /proc; macOS: fchmodat without following); for each folder in the
     top, its entries that are not folders are removed and its folders moved up into the top (rename relative to the
-    two descriptors, under a name not in use), then it is removed; this until the top holds no folder (_remove_tree_fd).
+    two descriptors, under a random name), then it is removed; this until the top holds no folder (_remove_tree_fd).
     Elsewhere (Windows):
     shutil.rmtree(ignore_errors=True), RecursionError caught. What a process still running writes there meanwhile
     (one that left the engine's process group: §6.3) can keep the folder from being removed: the removal is tried
@@ -1412,10 +1411,10 @@ def _remove_tree_fd(top: str, end: float = float("inf")) -> None:
     1 200 was removed; on Linux the same tree takes a fraction of a second. A folder that cannot be opened, emptied or
     moved stays where it is, and so does the top."""
     fd = _open_dir(top, None)
-    # the names of the folders moved up, never reused in a try. One in use: the move fails (a file, a folder that is
-    # not empty) or replaces an empty folder of the tree; what is in use is emptied in the same round, so the next
-    # round moves what is left
-    numbers = itertools.count()
+    # the name of each folder moved up: 16 random hex digits, so that what the port left in the folder cannot hold it.
+    # Up to the review of 2026-11-22 the names were .rigorous_levels_rm_0, _1, ... counted from 0 in each try: a top
+    # holding only .rigorous_levels_rm_0/x stayed (x was moved onto the name of its own parent, which failed, so no
+    # round removed anything, and each new try began again from 0)
     try:
         while True:
             _check_end(end)
@@ -1434,7 +1433,7 @@ def _remove_tree_fd(top: str, end: float = float("inf")) -> None:
                         _check_end(end)
                         try:
                             os.close(_open_dir(name, cfd))    # its rwx: moving a folder to another parent writes its ".."
-                            os.rename(name, f".rigorous_levels_rm_{next(numbers)}", src_dir_fd=cfd, dst_dir_fd=fd)
+                            os.rename(name, ".rigorous_levels_rm_" + secrets.token_hex(8), src_dir_fd=cfd, dst_dir_fd=fd)
                         except OSError:
                             pass
                 finally:

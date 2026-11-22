@@ -185,11 +185,17 @@ CI run 44990914827 on fa427b0: 15 of 16 jobs failed (only free-threaded passed).
   all its cases, takes 0.65 s. Now no step is more than two levels below the top and `..` is never opened: each folder inside a folder of
   the top is given the owner's rwx and moved up into the top, then emptied in its turn (§6.7, rule of 2026-11-22). The
   tests of the walk back up through `..` (the parent moved, the parent on another device) are replaced by one that
-  counts the levels opened and the `..` opened (on the code before: `..` opened 60 times for 60 folders) and checks
-  that every move goes into the top. 7 mutants of the new lines: 4 killed at once; 1 (no time check at each folder of
-  the top) killed after a case added to the test of the 30 s cap; 2 equivalent (the round counted as progress after a
-  move, which an rmdir in the same round always follows; a check that the name of a move is free, whose absence only
-  makes that move fail and a later round do it), both removed from the code. Also found on the way:
+  counts the levels opened and the `..` opened (on the code before: `..` opened 61 times for the 61 folders of the
+  test) and checks that every move goes into the top. 7 mutants of the new lines: 4 killed at once; 1 (no time check
+  at each folder of the top) killed after a case added to the test of the 30 s cap; 2 taken out of the code as
+  equivalent. One was not:
+  the names of the moves were `.rigorous_levels_rm_0`, `_1`, ... counted from 0 in each try, so a top holding only
+  `.rigorous_levels_rm_0/x` (names the port can make) stayed: `x` was moved onto the name of its own parent, no round
+  removed anything and each try began again from 0 (review of 2026-11-22; on the code before the walk down removed
+  it). The names of the moves are now `.rigorous_levels_rm_` and 16 random hexadecimal digits, and a new test plants
+  such names. The other (the round counted as progress after a move as well) gave the same folders left on 400 random
+  trees with folders that cannot be opened. The review also added a test of a folder of the top that cannot be opened
+  (the other folders are still removed) and a case of the 30 s cap checked at each move. Also found on the way:
   listing a folder a second time with `os.scandir` on the same descriptor returned it empty after a change (measured on
   btrfs, Python 3.12), so each listing opens a new descriptor of `.`.
 - Code, macOS: whether `os.chmod` can change a name relative to a folder without following a link was read at each
