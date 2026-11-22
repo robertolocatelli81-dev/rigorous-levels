@@ -215,8 +215,14 @@ given it first: on Linux through a descriptor, never by name, the top folder inc
 2026-11-21, with the `fchmodat2` system call and `AT_EMPTY_PATH` on that descriptor: Linux 6.6 and later, x86-64 and
 arm64; with an older kernel without `/proc`, or without ctypes, such a folder stays); on macOS, where there is no
 `O_PATH`, by name: `fchmodat` without following a link, after an `lstat` (a file put under that name in between
-would take the mode, as measured on Linux with `fchmodat2` called by name; not measured on macOS). The walk goes
-back up through `..` only if it is the folder it came from. Windows: `shutil.rmtree`. A path whose
+would take the mode, as measured on Linux with `fchmodat2` called by name; not measured on macOS). No step is more
+than two levels below the top folder and `..` is never opened (rule of 2026-11-22, replacing a walk down and back up
+through `..`): for each folder in the top, its entries that are not folders are removed, each of its folders is given
+the owner's rwx and moved up into the top (`renameat` relative to the two descriptors, as
+`.rigorous_levels_rm_<n>`, n counted from 0 in each try: if that name is in use the move fails, or replaces an empty
+folder, and a later round moves the folder), and it is removed; this until the top holds no folder. Measured with the walk down, in CI
+on macOS: 5 000 folders one inside the other, made by the test through descriptors in 43 s and 53 s, were not removed
+within the 30 s below, while 1 200 were. Windows: `shutil.rmtree`. A path whose
 last part is not a name (a final separator, `.` or `..`) is not removed: the system resolves a link there. The
 removal is tried again after 0.05, 0.1 and 0.2 s if the folder is still there (a process that outlived the run and
 still writes in it), and the whole removal stops 30 s after it began, checked at each folder and each entry; after
@@ -226,7 +232,7 @@ What it does not see: on Windows the status-change time does not exist (`st_ctim
 change undone before the run ends (content, size, mode, times set back with `utime`) is not seen there; the entries
 inside a folder the host did not put there are not listed one by one (the folder is named); a process that outlived
 the run and keeps writing longer than the removal tries can keep the folder in the temporary directory, and one
-that keeps making folders one inside the other is followed down until those 30 s end (measured without that cap: such
+that keeps making folders one inside the other is followed until those 30 s end (measured without that cap: such
 a process of 3 s and of 9 s kept the removal busy for 8.5 s and 19.5 s, and `run_port`, with the engine replaced,
 returned 8.2 s after its start with the one of 3 s). Measured on
 Linux (btrfs) with the engine replaced (`tests/test_multiport.py` `TestWorkFolderClosed20261120`) and with `bwrap`

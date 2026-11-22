@@ -169,6 +169,45 @@ fail (9 failures with the sub-cases: 2, 1 and 6) and the fourth ends in an error
 mutants of the lines of this review, 13 killed. Not measured: whether a WASI guest under wasmtime can make such links or
 remove that file (wasmtime is not installed where this was measured).
 
+### Fixed after the CI run on fa427b0: Linux and ARM, macOS, Windows (2026-11-22)
+
+CI run 44990914827 on fa427b0: 15 of 16 jobs failed (only free-threaded passed). The causes, measured:
+
+- Code, all platforms: `port_runner.py` was put in the work folder with `shutil.copy`, which copies the mode of the
+  installed file as well (0666 on the CI runners, read from the reason of the failure). Now `shutil.copyfile`: the
+  content only, the mode the umask gives, as for `request.json` (sentence added to `docs/PORT_CONTRACT.md` §6.7). The
+  Linux test changed that mode to 0666, which was no change there, and replaced the file with one made under the
+  umask (2 failures on each Linux and ARM job). New test: the installed file 0755, 0666 and 0600 gives the same mode
+  as `request.json` (on the code before: 3 failures).
+- Code, macOS: the removal of the work folder walked down and back up through `..`, one folder at a time. On macOS
+  5 000 folders one inside the other, made by the test through descriptors in 43 s and 53 s (Python 3.14 and 3.12), were
+  not removed within the 30 s cap (the walk stopped, the folder stayed), while 1 200 were; on Linux (CI) the whole test,
+  all its cases, takes 0.65 s. Now no step is more than two levels below the top and `..` is never opened: each folder inside a folder of
+  the top is given the owner's rwx and moved up into the top, then emptied in its turn (§6.7, rule of 2026-11-22). The
+  tests of the walk back up through `..` (the parent moved, the parent on another device) are replaced by one that
+  counts the levels opened and the `..` opened (on the code before: `..` opened 60 times for 60 folders) and checks
+  that every move goes into the top. 7 mutants of the new lines: 4 killed at once; 1 (no time check at each folder of
+  the top) killed after a case added to the test of the 30 s cap; 2 equivalent (the round counted as progress after a
+  move, which an rmdir in the same round always follows; a check that the name of a move is free, whose absence only
+  makes that move fail and a later round do it), both removed from the code. Also found on the way:
+  listing a folder a second time with `os.scandir` on the same descriptor returned it empty after a change (measured on
+  btrfs, Python 3.12), so each listing opens a new descriptor of `.`.
+- Code, macOS: whether `os.chmod` can change a name relative to a folder without following a link was read at each
+  call; a test that replaces `os.chmod` to record the calls made it false, so the call watched never came. Now read
+  once at import (a property of the platform).
+- Tests, macOS: APFS counts every entry of a folder in its number of names, so the reason says "the folder: names
+  6 -> 63, ..." there (accepted on macOS only); and the test of the top folder left 000 expects on macOS, which has no
+  `O_PATH`, the documented `fchmodat` by name without following a link.
+- Tests, Windows (19 failures): `os.chmod` there sets only the read-only flag (0600 reads 0666, a folder 0777), so the
+  modes expected are now the ones read before the run; the victim file is written in binary (no `\r\n`); the generated
+  names no longer end with a space or a period, which Windows drops from a name.
+- Tests, every platform: `TestWasmChmodNoFollow20261120` and `TestWasmHardLinkAndStderr20261120` expected 0644 for
+  `request.json` after the run, which only umask 022 gives (12 + 1 failures with umask 000 and with 077, measured
+  locally); now the mode read before the run.
+
+Measured locally (Linux, btrfs, Python 3.12): the CI list of test modules under umask 000, 022 and 077, 413 tests OK,
+100 skipped (no container engines here).
+
 ## 0.3.0 — 2026-11-12 (first release; developed on branch dev-0.3 from 7beff99 since 2026-11-11)
 
 ### Name (2026-11-12)
