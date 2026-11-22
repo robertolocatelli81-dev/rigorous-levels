@@ -1319,7 +1319,10 @@ class TestWasmChmodNoFollow20261120(unittest.TestCase):
     """0.3.0: _run_wasm made the work folder's files 0444 for the run and 0644 after it with os.chmod, which follows a
     symbolic link (os.walk lists a link to a file among the files): a link in the work folder pointing at a 0600 file
     of the user left that file 0644. The engine is replaced (probe and _run): every kind of entry, planted before the
-    run or by the run itself, must leave what lies outside the work folder as it was."""
+    run or by the run itself, must leave what lies outside the work folder as it was. The modes expected are the ones
+    read before the run (the umask decides the mode of request.json; on Windows os.chmod sets only the read-only flag:
+    0600 reads 0666 there and a folder 0777): the victim and vdir unchanged, request.json 0444 during the run and its
+    own mode again after it."""
 
     def _one(self, kind, when):
         from unittest import mock
@@ -1337,6 +1340,8 @@ class TestWasmChmodNoFollow20261120(unittest.TestCase):
             with open(os.path.join(work, "request.json"), "w") as f:
                 f.write("{}")
             open(os.path.join(outdir, "output.json"), "wb").close()
+            mode = lambda q: stat.S_IMODE(os.stat(q).st_mode)          # noqa: E731
+            self.expected = (mode(victim), mode(vdir), 0o444, mode(os.path.join(work, "request.json")))
 
             def plant():
                 p = os.path.join(work, "entry")
@@ -1388,7 +1393,7 @@ class TestWasmChmodNoFollow20261120(unittest.TestCase):
         for kind in kinds:
             for when in ("before", "during"):
                 with self.subTest(kind=kind, when=when):
-                    self.assertEqual(self._one(kind, when), (0o600, 0o700, 0o444, 0o644))
+                    self.assertEqual(self._one(kind, when), self.expected)
                 n += 1
         self.assertEqual(n, 2 * len(kinds))
         if os.name == "posix":
@@ -1515,6 +1520,8 @@ class TestWasmHardLinkAndStderr20261120(unittest.TestCase):
             with open(os.path.join(work, "request.json"), "w") as f:
                 f.write("{}")
             open(os.path.join(outdir, "output.json"), "wb").close()
+            self.victim0 = stat.S_IMODE(os.stat(victim).st_mode)           # 0o600 (Windows: 0o666, the flag only)
+            self.request0 = stat.S_IMODE(os.stat(os.path.join(work, "request.json")).st_mode)   # the umask decides
             if before:
                 before(work, victim)
 
@@ -1539,14 +1546,14 @@ class TestWasmHardLinkAndStderr20261120(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
 
     def test_control_and_hard_link_in_the_work_folder(self):
-        self.assertEqual(self._run(), (0o600, 0o644, b"true stderr\n"))
+        self.assertEqual(self._run(), (self.victim0, self.request0, b"true stderr\n"))
         if not hasattr(os, "link"):
             self.skipTest("no os.link here")
         hard = lambda w, v: os.link(v, os.path.join(w, "hl"))        # noqa: E731
         for when in ("before", "during"):
             with self.subTest(when=when):
                 r = self._run(before=hard) if when == "before" else self._run(plant_work=hard)
-                self.assertEqual(r, (0o600, 0o644, b"true stderr\n"))
+                self.assertEqual(r, (self.victim0, self.request0, b"true stderr\n"))
 
     def test_second_name_made_after_the_lstat(self):
         from unittest import mock
@@ -1610,7 +1617,7 @@ class TestWasmHardLinkAndStderr20261120(unittest.TestCase):
             with self.subTest(case=name):
                 self.assertEqual(len(got), 1, "blocked, or an exception left _run_wasm")
                 mode, _, copied = got[0]
-                self.assertEqual(mode, 0o600)
+                self.assertEqual(mode, self.victim0)
                 self.assertNotIn(b"SECRET", copied)
                 self.assertEqual(copied, note + why)
 
@@ -1708,9 +1715,10 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp()
         self.victim = os.path.join(self.d, "victim")
-        with open(self.victim, "w") as f:
-            f.write("SECRET-OF-THE-USER\n")
+        with open(self.victim, "wb") as f:                      # bytes: no \r\n on Windows
+            f.write(b"SECRET-OF-THE-USER\n")
         os.chmod(self.victim, 0o600)
+        self.victim_mode = stat.S_IMODE(os.stat(self.victim).st_mode)   # 0o600 (Windows: 0o666, the read-only flag only)
 
     def tearDown(self):
         shutil.rmtree(self.d, ignore_errors=True)
@@ -1762,7 +1770,7 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
              ("'stderr.txt': missing", lambda w: os.unlink(os.path.join(w, "stderr.txt"))),
              ("'été ☃': file", lambda w: open(os.path.join(w, "été ☃"), "w").close())]
         if os.name == "posix":
-            k += [("'port_runner.py': mode 0o", lambda w: os.chmod(os.path.join(w, "port_runner.py"), 0o666)),
+            k += [("'port_runner.py': mode 0o", self._other_mode),
                   ("the folder: mode 0o", lambda w: os.chmod(w, 0o777))]
             try:
                 p = os.path.join(os.fsencode(self.d), b"probe\xff")
@@ -1803,6 +1811,12 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
             s.close()
 
     @staticmethod
+    def _other_mode(w):
+        """a mode the host did not give port_runner.py (the umask decides that one: 0666 with umask 000)"""
+        p = os.path.join(w, "port_runner.py")
+        os.chmod(p, 0o640 if stat.S_IMODE(os.lstat(p).st_mode) != 0o640 else 0o600)
+
+    @staticmethod
     def _append(p):
         with open(p, "a") as f:
             f.write(" ")
@@ -1820,6 +1834,7 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
             b = f.read()
         with open(p + ".new", "wb") as f:
             f.write(b)
+        shutil.copymode(p, p + ".new")                           # the same mode: only the inode and the times differ
         os.replace(p + ".new", p)
 
     @staticmethod
@@ -1836,6 +1851,30 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
         u, = self._go(lambda w: None)
         self.assertEqual((u.state, u.reason), ("OK", ""))
 
+    def test_runner_copied_without_the_mode_of_the_installed_file(self):
+        """port_runner.py is copied into the work folder with its content only (shutil.copyfile): its mode is the one
+        the umask gives, as for request.json, not the mode of the installed file (0.3.1 before the CI of 2026-11-22:
+        shutil.copy, so a package installed with umask 000 put a runner 0666 there and one installed 0755 an
+        executable one)"""
+        from unittest import mock
+        src = os.path.join(self.d, "installed_runner.py")
+        shutil.copyfile(MP.RUNNER, src)
+        modes = {}
+
+        def look(w):
+            for n in ("port_runner.py", "request.json"):
+                modes[n] = stat.S_IMODE(os.lstat(os.path.join(w, n)).st_mode)
+            with open(os.path.join(w, "port_runner.py"), "rb") as f, open(MP.RUNNER, "rb") as g:
+                modes["same content"] = f.read() == g.read()
+        for installed in (0o755, 0o666, 0o600):
+            with self.subTest(installed=oct(installed)):
+                os.chmod(src, installed)
+                with mock.patch.object(MP, "RUNNER", src):
+                    u, = self._go(look)
+                self.assertEqual((u.state, u.reason), ("OK", ""))
+                self.assertTrue(modes["same content"])
+                self.assertEqual(modes["port_runner.py"], modes["request.json"])
+
     def test_every_kind_of_entry_and_change_is_named(self):
         kinds = self._kinds()
         if os.name == "posix" and sys.platform.startswith("linux"):
@@ -1847,7 +1886,7 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
                 self.assertTrue(u.reason.startswith(self.HEAD), u.reason)
                 self.assertIn(named, u.reason)
                 self.assertEqual(u.levels, ())
-        self.assertEqual(stat.S_IMODE(os.stat(self.victim).st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(os.stat(self.victim).st_mode), self.victim_mode)
         with open(self.victim) as f:
             self.assertEqual(f.read(), "SECRET-OF-THE-USER\n")
 
@@ -1877,8 +1916,11 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
             self.assertIn(f"'{n}': file", u.reason)
         for n in names[20:]:
             self.assertNotIn(f"'{n}'", u.reason)
-        self.assertTrue(u.reason.endswith("the folder: modification time changed (an entry was created or removed); "
-                                          "and 37 more"), u.reason[-120:])
+        tail = "modification time changed (an entry was created or removed); and 37 more"
+        # APFS (macOS) counts every entry of a folder in its number of names: 4 entries + 2 before the run, 57 more after
+        self.assertTrue(u.reason.endswith("; the folder: " + tail)
+                        or (sys.platform == "darwin" and u.reason.endswith("; the folder: names 6 -> 63, " + tail)),
+                        u.reason[-120:])
 
     def test_named_and_counted_whatever_order_the_folder_lists(self):
         """the same 57 entries listed in ascending, descending and a shuffled order (file systems differ: btrfs lists
@@ -1939,7 +1981,8 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
             picks = rng.sample(pool, rng.randint(0, 4))
             fresh = ["".join(rng.choice(alphabet) for _ in range(rng.randint(1, 40))) for _ in range(rng.randint(0, 3))]
             fresh = [n for n in dict.fromkeys(fresh) if n not in (".", "..") and n.strip()
-                     and n not in ("request.json", "port_runner.py", "output.json", "stderr.txt")]
+                     and n not in ("request.json", "port_runner.py", "output.json", "stderr.txt")
+                     and not (os.name == "nt" and n[-1] in " .")]   # Windows drops a final space or period of a name
 
             def plant(w, picks=picks, fresh=fresh):
                 for _, p in picks:
@@ -2298,9 +2341,28 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
             threading.Thread(target=write, daemon=True).start()
             time.sleep(0.01)
         cases.append(("writer outlives the run", outlives))
+        from unittest import mock
+        from rigorous_levels import isolation
+        real_remove = isolation.remove_tree
         for name, plant in cases:
             with self.subTest(case=name):
-                u, = self._go(plant)                              # _go asserts the work folder is gone
+                took = []
+
+                def timed_plant(w, plant=plant):
+                    t = time.monotonic()
+                    plant(w)
+                    took.append(("plant", time.monotonic() - t))
+
+                def timed_remove(path):
+                    t = time.monotonic()
+                    real_remove(path)
+                    took.append(("remove_tree", time.monotonic() - t))
+                try:
+                    with mock.patch.object(isolation, "remove_tree", timed_remove):
+                        u, = self._go(timed_plant)                # _go asserts the work folder is gone
+                except AssertionError as e:                       # the seconds of each step, to tell slow from stuck
+                    raise AssertionError(f"{e} ({', '.join(f'{k} {v:.1f} s' for k, v in took)}; "
+                                         f"REMOVE_SECONDS {isolation.REMOVE_SECONDS})") from None
                 self.assertEqual(u.state, "ERROR")
         for name, plant in (("batch: deep 1200", deep(1200)), ("batch: top 000", lambda w: os.chmod(w, 0o000))):
             with self.subTest(case=name):
@@ -2566,9 +2628,11 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
         isolation.remove_tree(real)                               # control: the same folder by its name
         self.assertFalse(os.path.lexists(real))
 
-    def test_remove_tree_top_folder_is_never_changed_by_name(self):
-        """the top folder left 000: its mode is changed through a descriptor, never by name (between an lstat and a
-        chmod by name the name can become a link: measured before, the folder of the user it named got the rwx)"""
+    def test_remove_tree_top_folder_never_through_a_link(self):
+        """the top folder left 000: on Linux its mode is changed through a descriptor, never by name (between an lstat
+        and a chmod by name the name can become a link: measured before, the folder of the user it named got the rwx);
+        on macOS, which has no O_PATH, by name without following a link (docs/PORT_CONTRACT.md §6.7): a link put there
+        is not followed either"""
         from unittest import mock
         from rigorous_levels import isolation
         if not isolation._FD_REMOVAL:
@@ -2589,8 +2653,11 @@ class TestWorkFolderClosed20261120(unittest.TestCase):
         with mock.patch.object(isolation.os, "chmod", chmod), mock.patch.object(isolation, "REMOVE_PAUSES", ()):
             isolation.remove_tree(top)
         self.assertEqual(len(calls), 1, calls)
-        by_fd = str(calls[0][0]).startswith("/proc/self/fd/") or calls[0][1] is False
-        self.assertTrue(calls[0][0] != top and by_fd, calls)
+        if hasattr(os, "O_PATH"):
+            by_fd = str(calls[0][0]).startswith("/proc/self/fd/") or calls[0][1] is False
+            self.assertTrue(calls[0][0] != top and by_fd, calls)
+        else:
+            self.assertEqual(calls, [(top, False)])               # by name, never following
         self.assertEqual(stat.S_IMODE(os.lstat(vdir).st_mode), 0o500)
         self.assertTrue(os.path.islink(top))                      # the link stays, the folder it names untouched
         os.chmod(vdir, 0o700)

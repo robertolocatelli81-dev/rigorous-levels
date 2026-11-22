@@ -1315,6 +1315,10 @@ REMOVE_SECONDS = 30.0              # seconds after which remove_tree stops walki
 _FD_REMOVAL = (os.name == "posix" and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
                and os.open in os.supports_dir_fd and os.unlink in os.supports_dir_fd
                and os.rmdir in os.supports_dir_fd and os.scandir in os.supports_fd)
+# whether os.chmod can change a name relative to a folder without following a link (macOS: fchmodat), read once at
+# import: a property of the platform. Read at each call before (CI 2026-11-22, macOS): a test that replaces os.chmod
+# to record the calls made it False, since the replacement is in neither set, and the call it watches never came
+_CHMOD_AT_NOFOLLOW = os.chmod in os.supports_follow_symlinks and os.chmod in os.supports_dir_fd
 _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
 
 
@@ -1343,7 +1347,7 @@ def _owner_rwx_unopened(name: str, dir_fd: Optional[int]) -> None:
                     _fchmodat2_nofollow("", pfd, stat.S_IMODE(st.st_mode) | 0o700)
         finally:
             os.close(pfd)
-    elif os.chmod in os.supports_follow_symlinks and os.chmod in os.supports_dir_fd:
+    elif _CHMOD_AT_NOFOLLOW:
         st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
         if stat.S_ISDIR(st.st_mode):
             os.chmod(name, stat.S_IMODE(st.st_mode) | 0o700, dir_fd=dir_fd, follow_symlinks=False)

@@ -173,7 +173,8 @@ physics of the other solver.
 on 2026-11-21 after the review of that code, before the new code, and again that day after the second review:
 the removal). The work folder is read-only for the port, so after
 the run it must hold exactly what the host put there. Before the run the host puts in it `request.json`
-(`requests.json` for a batch, §8), `port_runner.py`, `output.json` (empty: the mount point of the engines that bind
+(`requests.json` for a batch, §8), `port_runner.py` (its content only, not the mode of the installed file: rule added on
+2026-11-22; the files the host writes there take the mode the host process's umask gives), `output.json` (empty: the mount point of the engines that bind
 the output file) and `stderr.txt` (empty: the file the host writes the run's standard error to), sets the folder's
 modification time to a fixed value (86 400 s after the epoch), and records, with `lstat` (a link is never followed):
 for the folder and for each entry the kind and permission bits (`st_mode`), device, inode, number of names, owner and

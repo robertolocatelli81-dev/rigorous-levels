@@ -342,7 +342,7 @@ def run_ports(requests, python: Optional[str] = None, *, engine: str = "auto", i
     try:
         with open(os.path.join(work, "requests.json"), "w", encoding="utf-8") as f:
             json.dump([r.json() for r in reqs], f)
-        shutil.copy(RUNNER, os.path.join(work, isolation.RUNNER_NAME))
+        shutil.copyfile(RUNNER, os.path.join(work, isolation.RUNNER_NAME))   # the content only (§6.7)
         out_path = os.path.join(outdir, "output.json")
         open(out_path, "wb").close()
         open(os.path.join(work, "output.json"), "wb").close()
@@ -394,7 +394,7 @@ def run_port(r: Request, python: Optional[str] = None, *, engine: str = "auto", 
     try:
         with open(os.path.join(work, "request.json"), "w", encoding="utf-8") as f:
             json.dump(r.json(), f)
-        shutil.copy(RUNNER, os.path.join(work, isolation.RUNNER_NAME))
+        shutil.copyfile(RUNNER, os.path.join(work, isolation.RUNNER_NAME))   # the content only (§6.7)
         out_path = os.path.join(outdir, "output.json")
         open(out_path, "wb").close()               # the ONLY writable file of the port
         open(os.path.join(work, "output.json"), "wb").close()   # mount point for the engines that bind the file
